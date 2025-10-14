@@ -53,7 +53,6 @@ ggplot(aes(x = contrast_bin, y = mean, ymin = mean - 2*se, ymax = mean + 2*se)) 
 
 
 ```{r, fig.height=7,fig.width=12, error=F, warning=F, message=F}
-
 # df = df %>% filter(subject_id < 10)
 
 
@@ -105,13 +104,50 @@ plot_subjects(df,31:40)
 plot_subjects(df,41:50)
 plot_subjects(df,51:60)
 plot_subjects(df,60:70)
+```
 
+
+```{r, fig.height=7,fig.width=12, error=F, warning=F, message=F}
+
+df = df %>% filter(subject_id < 10)
+
+
+# summarize each measure separately, then bind them
+bind_rows(
+  df %>%
+    mutate(contrast_bin = cut(contrast, 10)) %>%
+    group_by(contrast_bin, subject_id) %>%
+    summarize(name = "correct",
+              mean = mean(correct),
+              se = sd(correct) / sqrt(n())),
+  
+  df %>%
+    mutate(contrast_bin = cut(contrast, 10)) %>%
+    group_by(contrast_bin,correct,subject_id) %>%
+    summarize(name = "rt",
+              mean = mean(rt),
+              se = sd(rt) / sqrt(n())),
+  
+  df %>%
+    mutate(contrast_bin = cut(contrast, 10)) %>%
+    group_by(contrast_bin, correct,subject_id) %>%   # <-- group by correctness only here
+    summarize(name = "responseConf",
+              mean = mean(responseConf),
+              se = sd(responseConf) / sqrt(n()))
+) %>% 
+ggplot(aes(x = contrast_bin, y = mean, ymin = mean - 2*se, ymax = mean + 2*se)) +
+  geom_pointrange(aes(color = as.factor(correct))) +   # only affects responseConf
+  facet_grid(name~subject_id, scales = "free") +
+  theme_classic(base_size = 16) +
+  labs(color = "Correct")
 ```
 
 # fit model
 
 ```{r}
 df = df %>% filter(subject_id < 11)
+
+
 df$subject_id = as.numeric(as.factor(df$subject_id))
 
 t_p_s = df %>% group_by(subject_id) %>% summarize(n = n())
