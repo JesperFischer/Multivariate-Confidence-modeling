@@ -332,17 +332,10 @@ generated quantities {
   int pos;
   pos = 1;
   for (s in 1:S) {
-<<<<<<< HEAD
     int n_s = ends[s] - starts[s] + 1;
     vector[n_s] log_lik_s;
 
     log_lik_s = gauss_copula_cholesky_per_row(u_mixx[starts[s]:ends[s], ], rho_chol[s]);
-=======
-    int n_s = t_p_s[s];
-    vector[n_s] log_lik_s;
-
-    log_lik_s = gauss_copula_cholesky_per_row(u_mixx[1:n_s, ], rho_chol[s]);
->>>>>>> 0d50b1053fd169d28afd01bd941966ac08995703
 
     // store results in the big vector
     log_lik_cop[pos:(pos + n_s - 1)] = log_lik_s;
@@ -350,10 +343,6 @@ generated quantities {
     pos += n_s;
   }
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 0d50b1053fd169d28afd01bd941966ac08995703
   for(s in 1:S){
 
     rho_p_rt[s] = multiply_lower_tri_self_transpose(rho_chol[s])[1, 2];

@@ -261,22 +261,14 @@ model {
   gm[1] ~ normal(5,5); //global mean of beta
   gm[2] ~ normal(0,2); //global mean of beta
   gm[3] ~ normal(-4,1); //global mean of beta
-<<<<<<< HEAD
   gm[4:11] ~ normal(0,3); //global mean of beta
-=======
-  gm[4:12] ~ normal(0,3); //global mean of beta
->>>>>>> 0d50b1053fd169d28afd01bd941966ac08995703
 
   to_vector(z_expo) ~ std_normal();
 
   tau_u[1] ~ normal(3 , 3);
   tau_u[2] ~ normal(0 , 3);
   tau_u[3] ~ normal(0 , 3);
-<<<<<<< HEAD
   tau_u[4:11] ~ normal(0 , 3);
-=======
-  tau_u[4:12] ~ normal(0 , 3);
->>>>>>> 0d50b1053fd169d28afd01bd941966ac08995703
 
   L_u ~ lkj_corr_cholesky(2);
 
@@ -338,18 +330,10 @@ generated quantities {
   int pos;
   pos = 1;
   for (s in 1:S) {
-<<<<<<< HEAD
     int n_s = ends[s] - starts[s] + 1;
     vector[n_s] log_lik_s;
 
     log_lik_s = gauss_copula_cholesky_per_row(u_mixx[starts[s]:ends[s], ], rho_chol[s]);
-=======
-    int n_s = t_p_s[s];
-    vector[n_s] log_lik_s;
-
-    log_lik_s = gauss_copula_cholesky_per_row(u_mixx[1:n_s, ], rho_chol[s]);
->>>>>>> 0d50b1053fd169d28afd01bd941966ac08995703
-
     // store results in the big vector
     log_lik_cop[pos:(pos + n_s - 1)] = log_lik_s;
 
