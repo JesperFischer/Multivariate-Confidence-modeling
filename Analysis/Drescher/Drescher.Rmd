@@ -261,7 +261,15 @@ predictions %>%
   geom_line(aes(x = x, y = prob, group = draw))+
   geom_point(aes(x = x, y = bin_pred, group = draw))+
   facet_wrap(~subject_id, scales = "free") +
-  theme_classic(base_size = 16)
+  theme_classic(base_size = 16)+
+  theme(
+      strip.background = element_blank(),  # remove facet boxes
+      strip.text = element_blank(),        # remove facet labels
+      axis.text = element_blank(),         # remove x and y axis numbers
+      axis.ticks = element_blank(),        # remove tick marks
+      axis.title = element_blank()         # remove axis titles
+    )
+
 
 
 predictions %>% group_by(draw,subject_id) %>% summarize(p_correct = sum(bin_pred) / n()) %>% 
@@ -280,7 +288,14 @@ predictions %>%
   geom_line(aes(x = x, y = RT_pred, group = draw),alpha = 0.1)+
   geom_point(data = df %>% mutate(draw = NA), aes(x = contrast, y = rt, group = draw), shape = 21)+
   facet_wrap(~subject_id, scales = "free") +
-  theme_classic(base_size = 16)
+  theme_classic(base_size = 16)+  theme(
+      strip.background = element_blank(),  # remove facet boxes
+      strip.text = element_blank(),        # remove facet labels
+      axis.text = element_blank(),         # remove x and y axis numbers
+      axis.ticks = element_blank(),        # remove tick marks
+      axis.title = element_blank()         # remove axis titles
+    )
+
 
 predictions %>% group_by(x,subject_id) %>% 
   summarize(RT_pred_mean = mean(RT_pred),
@@ -297,7 +312,14 @@ predictions %>% group_by(x,subject_id) %>%
   geom_ribbon(aes(x = x, y = RT_pred_mean, ymin = q30,ymax = q70),alpha = 0.5)+
   geom_point(data = df, aes(x = contrast, y = rt), shape = 21)+
   facet_wrap(~subject_id, scales = "free") +
-  theme_classic(base_size = 16)
+  theme_classic(base_size = 16)+  theme(
+      strip.background = element_blank(),  # remove facet boxes
+      strip.text = element_blank(),        # remove facet labels
+      axis.text = element_blank(),         # remove x and y axis numbers
+      axis.ticks = element_blank(),        # remove tick marks
+      axis.title = element_blank()         # remove axis titles
+    )
+
 
 
 
@@ -308,7 +330,14 @@ predictions %>%
              position = "identity",col = "black", alpha = 0.5)+
   geom_density(aes(x = RT_pred, group = draw), alpha = 0.1)+
   facet_wrap(~subject_id, scales = "free") +
-  theme_classic(base_size = 16)
+  theme_classic(base_size = 16)+  theme(
+      strip.background = element_blank(),  # remove facet boxes
+      strip.text = element_blank(),        # remove facet labels
+      axis.text = element_blank(),         # remove x and y axis numbers
+      axis.ticks = element_blank(),        # remove tick marks
+      axis.title = element_blank()         # remove axis titles
+    )
+
 
 ```
 
@@ -321,7 +350,15 @@ predictions %>%
   geom_point(data = df %>% mutate(draw = NA) %>% mutate(Correct = ifelse(correct == 1, "Correct","Incorrect")),
              aes(x = contrast, y = responseConf / 6, col = (Correct), group = interaction(Correct,draw)))+
   facet_wrap(~subject_id, scales = "free") +
-  theme_classic(base_size = 16)
+  theme_classic(base_size = 16)+
+    theme(
+      strip.background = element_blank(),  # remove facet boxes
+      strip.text = element_blank(),        # remove facet labels
+      axis.text = element_blank(),         # remove x and y axis numbers
+      axis.ticks = element_blank(),        # remove tick marks
+      axis.title = element_blank()         # remove axis titles
+    )
+
 
 
 predictions %>% 
@@ -342,7 +379,15 @@ predictions %>%
   geom_point(data = df %>% mutate(Correct = as.factor(ifelse(correct == 1, "Correct","Incorrect"))),
              aes(x = contrast, y = responseConf/6, fill = Correct), col = "black", shape = 21)+
   facet_wrap(~subject_id, scales = "free") +
-  theme_classic(base_size = 16)
+  theme_classic(base_size = 16)+
+    theme(
+      strip.background = element_blank(),  # remove facet boxes
+      strip.text = element_blank(),        # remove facet labels
+      axis.text = element_blank(),         # remove x and y axis numbers
+      axis.ticks = element_blank(),        # remove tick marks
+      axis.title = element_blank()         # remove axis titles
+    )
+
 
 
 
@@ -355,7 +400,15 @@ predictions %>%
              position = "identity",col = "black", alpha = 0.5)+
   geom_density(aes(x = Confidence, color = Correct, group = interaction(Correct,draw)), alpha = 0.5)+
   facet_wrap(~subject_id, scales = "free") +
-  theme_classic(base_size = 16)
+  theme_classic(base_size = 16)+
+    theme(
+      strip.background = element_blank(),  # remove facet boxes
+      strip.text = element_blank(),        # remove facet labels
+      axis.text = element_blank(),         # remove x and y axis numbers
+      axis.ticks = element_blank(),        # remove tick marks
+      axis.title = element_blank()         # remove axis titles
+    )
+
 
     
 ```

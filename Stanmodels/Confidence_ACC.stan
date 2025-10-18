@@ -2,7 +2,7 @@ functions {
 
 
   real psycho_ACC(real x, real alpha, real beta, real lapse){
-   return (0.5+0.5*(lapse + (1-2*lapse) * inv_logit(beta * (x - alpha))));
+   return (0.5+0.5*((1-2*lapse) * inv_logit(beta * (x - alpha))));
   }
 
   real entropy(real p){
