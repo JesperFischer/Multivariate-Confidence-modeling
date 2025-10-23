@@ -108,6 +108,9 @@ plot_subjects <- function(df, subject_ids, bin = F) {
       theme(legend.position = "top")
 
   }else{
+
+    df = df %>% filter(subject %in% subject_ids)
+
     # compute bin breaks and midpoints first
     bin_breaks <- seq(min(df$X, na.rm = TRUE), max(df$X, na.rm = TRUE), length.out = bin + 1)
     bin_mids <- (bin_breaks[-1] + bin_breaks[-length(bin_breaks)]) / 2
@@ -145,10 +148,10 @@ plot_subjects <- function(df, subject_ids, bin = F) {
 
     # plot
     plot <- df_summary %>%
-      filter(subject %in% subject_ids) %>%
       ggplot(aes(x = X_mid, y = mean,
                  ymin = mean - 2*se, ymax = mean + 2*se)) +
       geom_pointrange(aes(color = as.factor(Correct))) +
+      geom_line(aes(color = as.factor(Correct)), alpha = 0.5)+
       facet_grid(name ~ subject, scales = "free") +
       theme_classic(base_size = 16) +
       labs(x = "X", color = "Correct") +

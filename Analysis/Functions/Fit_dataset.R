@@ -61,7 +61,7 @@ remover = function(df){
 
   n_subj <- length(unique(plotdf %>% .$subject))
 
-  subject_chunks <- split(unique(plotdf$subject), ceiling(seq_along(1:n_subj) / 7))
+  subject_chunks <- split(unique(plotdf$subject), ceiling(seq_along(1:n_subj) / 5))
 
   badsubject_plots <- lapply(subject_chunks, function(chunk) plot_subjects(plotdf, chunk, bin = 7))
   badsubject_plots
@@ -75,19 +75,24 @@ remover = function(df){
 
 check_modeltype = function(ACC,modeltype,conf){
 
-  if(modeltype == "pure" & ACC == T, conf = "ord_beta"){
+  if(modeltype == "pure" & ACC == T & conf == "ord_beta"){
     mod = cmdstan_model(here::here("Stanmodels","Confidence_ACC.stan"))
 
-  }else if(modeltype == "meta_un" & ACC == T, conf = "ord_beta"){
-    mod =
-  }else if(modeltype == "meta_un_rt_un" & ACC == T, conf = "ord_beta"){
-    mod =
-  }else if(modeltype == "pure" & ACC == F, conf = "ord_beta"){
+  }else if(modeltype == "meta_un" & ACC == T & conf == "ord_beta"){
+    mod = NA
+
+  }else if(modeltype == "meta_un_rt_un" & ACC == T & conf == "ord_beta"){
+    mod = NA
+
+  }else if(modeltype == "pure" & ACC == F & conf == "ord_beta"){
     mod = cmdstan_model(here::here("Stanmodels","Confidence_Standard.stan"))
-  }else if(modeltype == "meta_un" & ACC == F, conf = "ord_beta"){
-    mod =
-  }else if(modeltype == "meta_un_rt_un" & ACC == F, conf = "ord_beta"){
-    mod =
+
+  }else if(modeltype == "meta_un" & ACC == F & conf == "ord_beta"){
+    mod = NA
+
+  }else if(modeltype == "meta_un_rt_un" & ACC == F & conf == "ord_beta"){
+    mod = NA
+
   }
 
   return(mod)

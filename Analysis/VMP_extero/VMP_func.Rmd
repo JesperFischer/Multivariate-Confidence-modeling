@@ -25,6 +25,7 @@ invisible(
 ```{r}
 df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>% 
     mutate(DecisionRT = as.numeric(DecisionRT),
+           ConfidenceRT = as.numeric(ConfidenceRT),
          Confidence = as.numeric(Confidence),
          ResponseCorrect = as.numeric(ifelse(ResponseCorrect == "1",1,
                                              ifelse(ResponseCorrect == "1.0",1,
@@ -47,25 +48,31 @@ df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>%
 ```
 
 # bad subjects
-```{r, fig.width=10,fig.height=7, message=FALSE}
+```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
 remover(df %>% filter(cohort == "vmp1"))
+removers_vmp1 = c("16")
+
 ```
 
 
-```{r, fig.width=10,fig.height=7, message=FALSE}
+```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
 remover(df %>% filter(cohort == "vmp2"))
+
+removers_vmp2 = c("227","263","275","298","300","326","397","495","546")
+# 300 just had the first 10 trials being bad
+# same with 495 & 546
 ```
 
 
 ```{r, fig.height=7,fig.width=10}
-(Group_plot(df %>% filter(cohort == "vmp1"))+ggtitle("Cohort1") | 
-   Group_plot(df %>% filter(cohort == "vmp2"))+ggtitle("Cohort2"))+
+(Group_plot(df %>% filter(cohort == "vmp1" & !subject %in% removers_vmp1))+ggtitle("Cohort1") | 
+   Group_plot(df %>% filter(cohort == "vmp2"& !subject %in% removers_vmp2))+ggtitle("Cohort2"))+
   plot_layout(guides = "collect")&theme(legend.position = "top")
 ```
 
 
 ```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
-n_subj <- length(unique(df %>% filter(cohort == "vmp1") %>% .$subject))
+n_subj <- length(unique(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1) %>% .$subject))
 subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 10))
 
 plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(cohort == "vmp1"), chunk, bin = 7))
@@ -74,7 +81,7 @@ plots
 
 
 ```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
-n_subj <- unique(df %>% filter(cohort == "vmp2") %>% .$subject)
+n_subj <- unique(df %>% filter(cohort == "vmp2"& !subject %in% removers_vmp2) %>% .$subject)
 subject_chunks <- split(n_subj, ceiling(seq_along(n_subj) / 10))
 
 plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(cohort == "vmp2"), chunk, bin = 7))
@@ -86,9 +93,9 @@ plots
 
 ```{r}
 
-fit0 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "pure",conf = "ord_beta")
-fit1 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "meta_un",conf = "ord_beta")
-fit2 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "meta_un_rt_un",conf = "ord_beta")
+fit0 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1),ACC = F, "VMP1",modeltype = "pure",conf = "ord_beta")
+fit1 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1),ACC = F, "VMP1",modeltype = "meta_un",conf = "ord_beta")
+fit2 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1),ACC = F, "VMP1",modeltype = "meta_un_rt_un",conf = "ord_beta")
 
 
 #fit1 = fit_data_copula_rt(df %>% filter(cohort == "vmp2"),ACC = F, "VMP2")
