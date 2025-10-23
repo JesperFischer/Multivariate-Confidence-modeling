@@ -1,0 +1,145 @@
+---
+title: "Decender2020"
+output: html_document
+date: "2025-10-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(tidyverse,posterior,tidybayes,cmdstanr, furrr,futuremap,ordbetareg, future.apply, patchwork,purrr)
+
+
+invisible(
+  lapply(
+    list.files(here::here("Analysis", "Functions"), pattern = "\\.[Rr]$", full.names = TRUE),
+    source
+  )
+)
+```
+
+## R Markdown
+
+# Preprocesing
+
+```{r}
+df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>% 
+    mutate(DecisionRT = as.numeric(DecisionRT),
+         Confidence = as.numeric(Confidence),
+         ResponseCorrect = as.numeric(ifelse(ResponseCorrect == "1",1,
+                                             ifelse(ResponseCorrect == "1.0",1,
+                                                    ifelse(ResponseCorrect == "True",1,
+                                                           ifelse(ResponseCorrect == "0",0,
+                                                                  ifelse(ResponseCorrect == "0.0",0,
+                                                                         ifelse(ResponseCorrect == "False",0,NA))))))),
+         Decision = ifelse(Decision == "More",1,ifelse(Decision == "Less",0,NA))) %>% 
+  mutate(participant_id = as.numeric(as.factor(participant_id))) %>%
+  filter(Modality == "Extero") %>% 
+  filter(DecisionRT < 8 & DecisionRT > 0.1)%>% 
+  select(ResponseCorrect,participant_id,DecisionRT,Decision, Confidence, ConfidenceRT, Alpha,cohort)  %>% drop_na() %>% 
+  rename(
+    Confidence = Confidence,
+    X  = Alpha,
+    Y = Decision,
+    RT = DecisionRT,
+    subject = participant_id
+  ) %>% mutate(Correct = ResponseCorrect)
+```
+
+# bad subjects
+```{r, fig.width=10,fig.height=7}
+
+
+```
+
+
+
+```{r, fig.height=7,fig.width=10}
+(Group_plot(df %>% filter(cohort == "vmp1"))+ggtitle("Cohort1") | 
+   Group_plot(df %>% filter(cohort == "vmp2"))+ggtitle("Cohort2"))+
+  plot_layout(guides = "collect")
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(df %>% filter(cohort == "vmp1") %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 10))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(cohort == "vmp1"), chunk, bin = 7))
+plots
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- unique(df %>% filter(cohort == "vmp2") %>% .$subject)
+subject_chunks <- split(n_subj, ceiling(seq_along(n_subj) / 10))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(cohort == "vmp2"), chunk, bin = 7))
+plots
+
+
+
+
+```
+
+# fit model
+
+```{r}
+
+fit0 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "pure")
+fit0 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "meta_un")
+fit0 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "meta_un_rt_un")
+
+
+#fit1 = fit_data_copula_rt(df %>% filter(cohort == "vmp2"),ACC = F, "VMP2")
+```
+
+
+```{r}
+pred0 = Get_predictive(fit0,df %>% filter(cohort == "vmp1"), n_draws = 10)
+pred1 = Get_predictive(fit1,df %>% filter(cohort == "vmp2"), n_draws = 10)
+```
+
+
+
+
+
+
+```{r, fig.height=7, fig.width=12}
+bin_0 = Plot_bin(pred0,df %>% filter(cohort == "vmp1"))
+bin_1 = Plot_bin(pred1,df %>% filter(cohort == "vmp2"))
+
+bin_0[[1]]+ggtitle("t2_0")
+bin_1[[1]]+ggtitle("t2_1")
+bin_2[[1]]+ggtitle("t2_2")
+
+
+bin_0[[2]]+ggtitle("t2_0")
+bin_1[[2]]+ggtitle("t2_1")
+bin_2[[2]]+ggtitle("t2_2")
+
+```
+
+
+```{r, fig.height=7, fig.width=12}
+rt_0 = Plot_RT(pred0,df %>% filter(cohort == "vmp1"))
+rt_1 = Plot_RT(pred1,df %>% filter(cohort == "vmp2"))
+rt_2 = Plot_RT(pred2,df %>% filter(t2duration == 2))
+rt_0[[1]]+ggtitle("t2_0")
+rt_1[[1]]+ggtitle("t2_1")
+rt_2[[1]]+ggtitle("t2_2")
+
+
+rt_0[[2]]+ggtitle("t2_0")
+rt_1[[2]]+ggtitle("t2_1")
+rt_2[[2]]+ggtitle("t2_2")
+
+
+rt_0[[3]]+ggtitle("t2_0")
+rt_1[[3]]+ggtitle("t2_1")
+rt_2[[3]]+ggtitle("t2_2")
+```
+
+
+
+

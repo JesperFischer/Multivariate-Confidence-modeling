@@ -308,6 +308,8 @@ model {
 }
 
 generated quantities {
+
+  vector[S] c1 = c0 + exp(c11);
   vector[S] rho_p_rt;
   vector[S] rho_p_conf;
   vector[S] rho_rt_conf;
