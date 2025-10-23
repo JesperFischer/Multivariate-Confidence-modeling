@@ -7,7 +7,15 @@ date: "2025-10-13"
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-pacman::p_load(tidyverse,posterior,tidybayes,cmdstanr, furrr,futuremap,ordbetareg, future.apply)
+pacman::p_load(tidyverse,posterior,tidybayes,cmdstanr, furrr,futuremap,ordbetareg, future.apply, patchwork,purrr)
+
+
+invisible(
+  lapply(
+    list.files(here::here("Analysis", "Functions"), pattern = "\\.[Rr]$", full.names = TRUE),
+    source
+  )
+)
 ```
 
 ## R Markdown
@@ -17,118 +25,151 @@ df = read.delim(here::here("Data","Decender2020","rawData.txt"), sep = " ") %>% 
                                                                                        practiceblocks2 == 0) %>% 
   filter(rt > 0 & resp != -1, include == 1, block > 3) %>%
   filter(!sub %in% c(12,15,21,29)) %>% 
-  mutate(conf = ifelse(t2duration == 0,conf+3,conf)) %>% 
+  mutate(conf = ifelse(t2duration == 0,conf+3,conf),
+         X  = coh_single,
+         ConfidenceRT = NA) %>% 
   mutate(conf = case_when(
     sub == 7 & t2duration == 0 & conf == 4 ~ 6,
     sub == 7 & t2duration == 0 & conf == 6 ~ 4,
     sub == 7 & t2duration == 0 & conf == 1 ~ 6,
     sub == 7 & t2duration == 0 & conf == 3 ~ 4,
     TRUE ~ conf
-  ))
+  )) %>% 
+    rename(
+    Confidence = conf,
+    Y = cor,
+    RT = rt,
+    subject = sub
+  ) %>% 
+  mutate(Correct = Y)
 ```
 
+
+# bad subjects
+```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
+remover(df %>% filter(t2duration == 0))
+
+df %>% filter(t2duration == 0 & subject == 23) %>% ggplot(aes(x = X, y = Y))+
+  geom_jitter(width = 0.05, height = 0.1)+
+    geom_smooth(method = "glm", 
+    method.args = list(family = "binomial"), 
+    se = FALSE) 
+
+t2duration0_remover = 23
+```
+
+```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
+remover(df %>% filter(t2duration == 1))
+
+```
+
+
+```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
+remover(df %>% filter(t2duration == 2))
+```
 
 ```{r, fig.height=7,fig.width=10}
-
-# summarize each measure separately, then bind them
-bind_rows(
-  df %>%
-    group_by(coh_single,t2duration) %>%
-    summarize(name = "correct",
-              mean = mean(cor),
-              se = sd(cor) / sqrt(n())),
-  
-  df %>%
-    group_by(coh_single,cor,t2duration) %>%
-    summarize(name = "rt",
-              mean = mean(rt),
-              se = sd(rt) / sqrt(n())),
-  
-  df %>%
-    group_by(coh_single, cor,t2duration) %>%   # <-- group by correctness only here
-    summarize(name = "responseConf",
-              mean = mean(conf),
-              se = sd(conf) / sqrt(n()))
-) %>% 
-ggplot(aes(x = coh_single, y = mean, ymin = mean - 2*se, ymax = mean + 2*se)) +
-  geom_pointrange(aes(color = as.factor(cor))) +   # only affects responseConf
-  facet_wrap(t2duration~name, scales = "free") +
-  theme_classic(base_size = 16) +
-  labs(color = "Correct")
-
+(Group_plot(df %>% filter(t2duration == 0 & !subject %in% t2duration0_remover))+ggtitle("Cohort0") | 
+   Group_plot(df %>% filter(t2duration == 1))+ggtitle("Cohort1") |
+   Group_plot(df %>% filter(t2duration == 2))+ggtitle("Cohort2"))+
+  plot_layout(guides = "collect")&theme(legend.position = "top")
 ```
 
 
-```{r, fig.height=7,fig.width=12}
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(df %>% filter(t2duration == 0 & !subject %in% t2duration0_remover) %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 5))
 
-df = df %>% filter(sub < 4 & t2duration == 0)
-
-
-bind_rows(
-  df %>%
-    group_by(coh_single,t2duration, sub) %>%
-    summarize(name = "correct",
-              mean = mean(cor),
-              se = sd(cor) / sqrt(n())),
-  
-  df %>%
-    group_by(coh_single,cor,t2duration, sub) %>%
-    summarize(name = "rt",
-              mean = mean(rt),
-              se = sd(rt) / sqrt(n())),
-  
-  df %>%
-    group_by(coh_single, cor,t2duration, sub) %>%   # <-- group by correctness only here
-    summarize(name = "responseConf",
-              mean = mean(conf),
-              se = sd(conf) / sqrt(n()))
-) %>% 
-ggplot(aes(x = coh_single, y = mean, ymin = mean - 2*se, ymax = mean + 2*se)) +
-  geom_pointrange(aes(color = as.factor(cor))) +   # only affects responseConf
-  facet_wrap(sub~name, scales = "free") +
-  theme_classic(base_size = 16) +
-  labs(color = "Correct")
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(t2duration == 0), chunk, bin = 7))
+plots
 ```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(df %>% filter(t2duration == 1) %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 5))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(t2duration == 1), chunk, bin = 7))
+plots
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(df %>% filter(t2duration == 2) %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 5))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(t2duration == 2), chunk, bin = 7))
+plots
+```
+
 
 # fit model
 
 ```{r}
 
-df$sub = as.numeric(as.factor(df$sub))
+fit0 = fit_data_copula_rt(df %>% filter(t2duration == 0 & !subject %in% t2duration0_remover) %>% mutate(Confidence = Confidence -3),
+                          ACC = T, 
+                          "T2_0",
+                          modeltype = "pure",
+                          conf = "discrete_conf")
 
-t_p_s = df %>% group_by(sub) %>% summarize(n = n())
+
+fit01 = fit_data_copula_rt(df %>% filter(t2duration == 0 & !subject %in% t2duration0_remover) %>% mutate(Confidence = Confidence -3),
+                           ACC = T, 
+                           "T2_0",
+                           modeltype = "meta_un",
+                           conf = "discrete_conf")
 
 
-ends <- cumsum(t_p_s$n)
+fit02 = fit_data_copula_rt(df %>% filter(t2duration == 0 & !subject %in% t2duration0_remover) %>% mutate(Confidence = Confidence -3),
+                           ACC = T,
+                           "T2_0",
+                           modeltype = "meta_un_rt_un",
+                           conf = "discrete_conf")
 
-# Calculate the start points
-starts <- c(1, head(ends, -1) + 1)
 
-mod = cmdstan_model(here::here("Stanmodels","Confidence_ACC.stan"))
+fit0 = fit_data_copula_rt(df %>% filter(t2duration == 1),
+                          ACC = T, 
+                          "T2_1",
+                          modeltype = "pure",
+                          conf = "discrete_conf")
 
-datastan = list(N = nrow(df),
-              S = length(unique(df$sub)),
-              starts = starts,
-              minRT = unique(df %>% group_by(sub) %>% summarize(minRT = min(rt)) %>% .$minRT),
-              ends = ends,
-              t_p_s = t_p_s$n,
-              X = df$coh_single,
-              ACC = df$cor,
-              S_id = df$sub,
-              RT = df$rt,
-              Conf = df$conf/6,
-              binom_y = df$cor)
 
-cor <-mod$sample(
- data = datastan,
-  refresh = 10,
-  iter_sampling = 500,
-  iter_warmup = 500,
-  adapt_delta = 0.95,
-  max_treedepth = 12,
-  init  = 0,
-  parallel_chains = 4)
+fit01 = fit_data_copula_rt(df %>% filter(t2duration == 1),
+                           ACC = T, 
+                           "T2_1",
+                           modeltype = "meta_un",
+                           conf = "discrete_conf")
 
+
+fit02 = fit_data_copula_rt(df %>% filter(t2duration == 1),
+                           ACC = T,
+                           "T2_1",
+                           modeltype = "meta_un_rt_un",
+                           conf = "discrete_conf")
+
+
+
+
+fit0 = fit_data_copula_rt(df %>% filter(t2duration == 2),
+                          ACC = T, 
+                          "T2_1",
+                          modeltype = "pure",
+                          conf = "discrete_conf")
+
+
+fit01 = fit_data_copula_rt(df %>% filter(t2duration == 2),
+                           ACC = T, 
+                           "T2_1",
+                           modeltype = "meta_un",
+                           conf = "discrete_conf")
+
+
+fit02 = fit_data_copula_rt(df %>% filter(t2duration == 2),
+                           ACC = T,
+                           "T2_1",
+                           modeltype = "meta_un_rt_un",
+                           conf = "discrete_conf")
 ```
 
 

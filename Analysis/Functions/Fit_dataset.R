@@ -1,8 +1,8 @@
 remover = function(df){
 
   avg_acc = df %>% group_by(subject) %>%
-    summarize(mean = mean(ResponseCorrect),
-              se = (mean(ResponseCorrect) * (1-mean(ResponseCorrect))) /sqrt(n())) %>%
+    summarize(mean = mean(Correct),
+              se = (mean(Correct) * (1-mean(Correct))) /sqrt(n())) %>%
     mutate(measure = "A")
 
   avg_rt = df %>%
@@ -92,8 +92,29 @@ check_modeltype = function(ACC,modeltype,conf){
 
   }else if(modeltype == "meta_un_rt_un" & ACC == F & conf == "ord_beta"){
     mod = NA
-
   }
+
+
+  if(modeltype == "pure" & ACC == T & conf == "discrete_conf"){
+    mod = cmdstan_model(here::here("Stanmodels","Discrete Confidence","ACC_Bin_RT_Discrete_conf.stan"))
+
+  }else if(modeltype == "meta_un" & ACC == T & conf == "discrete_conf"){
+    mod = cmdstan_model(here::here("Stanmodels","Discrete Confidence","ACC_Bin_RT_Discrete_conf_metaun.stan"))
+
+  }else if(modeltype == "meta_un_rt_un" & ACC == T & conf == "discrete_conf"){
+    mod = cmdstan_model(here::here("Stanmodels","Discrete Confidence","ACC_Bin_RT_Discrete_conf_metaun_rt_un.stan"))
+
+  }else if(modeltype == "pure" & ACC == F & conf == "discrete_conf"){
+    mod = NA
+
+  }else if(modeltype == "meta_un" & ACC == F & conf == "discrete_conf"){
+    mod = NA
+
+  }else if(modeltype == "meta_un_rt_un" & ACC == F & conf == "discrete_conf"){
+    mod = NA
+  }
+
+
 
   return(mod)
 
@@ -114,7 +135,7 @@ fit_data_copula_rt = function(df,ACC, outputname,modeltype,conf){
   # Calculate the start points
   starts <- c(1, head(ends, -1) + 1)
 
-  mod = check_modeltype(ACC,modeltype)
+  mod = check_modeltype(ACC,modeltype,conf)
 
   datastan = list(N = nrow(df),
                   S = length(unique(df$subject)),
@@ -125,6 +146,9 @@ fit_data_copula_rt = function(df,ACC, outputname,modeltype,conf){
                   X = df$X,
                   S_id = df$subject,
                   RT = df$RT,
+                  ACC = df$Correct,
+                  K = length(unique(df$Confidence)),
+                  Conf = df$Confidence,
                   binom_y = df$Y)
 
 
@@ -138,8 +162,8 @@ fit_data_copula_rt = function(df,ACC, outputname,modeltype,conf){
     init  = 0,
     parallel_chains = 4)
 
-
-  cor$save_object(here::here("Saved models",paste0(outputname,".rds")))
+  name = paste0("N_",outputname,"ACC_",ACC,"modeltype_",modeltype,"conf_",conf)
+  cor$save_object(here::here("Saved models",paste0(name,".rds")))
 
   return(cor)
 
