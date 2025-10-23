@@ -47,17 +47,20 @@ df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>%
 ```
 
 # bad subjects
-```{r, fig.width=10,fig.height=7}
-
-
+```{r, fig.width=10,fig.height=7, message=FALSE}
+remover(df %>% filter(cohort == "vmp1"))
 ```
 
+
+```{r, fig.width=10,fig.height=7, message=FALSE}
+remover(df %>% filter(cohort == "vmp2"))
+```
 
 
 ```{r, fig.height=7,fig.width=10}
 (Group_plot(df %>% filter(cohort == "vmp1"))+ggtitle("Cohort1") | 
    Group_plot(df %>% filter(cohort == "vmp2"))+ggtitle("Cohort2"))+
-  plot_layout(guides = "collect")
+  plot_layout(guides = "collect")&theme(legend.position = "top")
 ```
 
 
@@ -77,18 +80,15 @@ subject_chunks <- split(n_subj, ceiling(seq_along(n_subj) / 10))
 plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(cohort == "vmp2"), chunk, bin = 7))
 plots
 
-
-
-
 ```
 
 # fit model
 
 ```{r}
 
-fit0 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "pure")
-fit0 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "meta_un")
-fit0 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "meta_un_rt_un")
+fit0 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "pure",conf = "ord_beta")
+fit1 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "meta_un",conf = "ord_beta")
+fit2 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"),ACC = F, "VMP1",modeltype = "meta_un_rt_un",conf = "ord_beta")
 
 
 #fit1 = fit_data_copula_rt(df %>% filter(cohort == "vmp2"),ACC = F, "VMP2")

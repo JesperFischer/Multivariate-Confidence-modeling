@@ -1,40 +1,102 @@
 remover = function(df){
-  avg_acc = df %>% group_by(participant_id) %>% summarize(mean = mean(ResponseCorrect)) %>% mutate(se = NA, measure = "correct")
-  avg_rt = df %>% group_by(participant_id) %>% summarize(mean = mean(DecisionRT), se = sd(DecisionRT)/sqrt(n())) %>% mutate(measure = "rt")
-  avg_conf = df %>% group_by(participant_id) %>% summarize(mean = mean(Confidence), se = sd(Confidence)/sqrt(n())) %>% mutate(measure = "confidence")
+
+  avg_acc = df %>% group_by(subject) %>%
+    summarize(mean = mean(ResponseCorrect),
+              se = (mean(ResponseCorrect) * (1-mean(ResponseCorrect))) /sqrt(n())) %>%
+    mutate(measure = "A")
+
+  avg_rt = df %>%
+    group_by(subject) %>%
+    summarize(mean = mean(RT),
+              se = sd(RT)/sqrt(n())) %>%
+    mutate(measure = "RT")
+
+  avg_conf = df %>% group_by(subject) %>%
+    summarize(mean = mean(Confidence),
+              se = sd(Confidence)/sqrt(n())) %>%
+    mutate(measure = "C")
+
   avg_confrt = df %>% mutate(ConfidenceRT = as.numeric(ConfidenceRT)) %>%
-    group_by(participant_id) %>% summarize(mean = mean(ConfidenceRT, na.rm = T), se = sd(ConfidenceRT)/sqrt(n())) %>% mutate(measure = "confidencert")
+    group_by(subject) %>%
+    summarize(mean = mean(ConfidenceRT, na.rm = T),
+              se = sd(ConfidenceRT)/sqrt(n())) %>%
+    mutate(measure = "cRT")
 
 
-  outliers = rbind(avg_acc,avg_rt,avg_conf,avg_confrt) %>% group_by(measure) %>% summarize(meann = mean(mean), se = sd(mean, na.rm = T)) %>%
-    mutate(low_int = meann - 2*se,high_int = meann + 2*se) %>% mutate(se = NULL)
 
-  dd = inner_join(rbind(avg_acc,avg_rt,avg_conf,avg_confrt),outliers, by = "measure") %>%
+  outliers = rbind(avg_acc,avg_rt,avg_conf,avg_confrt) %>%
+    group_by(measure) %>% summarize(meann = mean(mean),
+                                    se = sd(mean, na.rm = T)) %>%
+    mutate(low_int = meann - 2*se,
+           high_int = meann + 2*se) %>%
+    mutate(se = NULL)
+
+
+  dd = inner_join(rbind(avg_acc,
+                        avg_rt,
+                        avg_conf,
+                        avg_confrt),outliers, by = "measure") %>%
     mutate(outlier = ifelse(mean < low_int | mean > high_int,1,0))
 
 
-  inner_join(rbind(avg_acc,avg_rt,avg_conf,avg_confrt),outliers, by = "measure") %>%
+  outlier_labels = dd %>%
+    filter(outlier == 1) %>%
+    group_by(subject) %>%
+    summarize(flag = paste0("(", paste(measure, collapse = ","), ")"))
+
+
+
+  plotallsubj = inner_join(rbind(avg_acc,avg_rt,avg_conf,avg_confrt),outliers, by = "measure") %>%
     mutate(outlier = ifelse(mean < low_int | mean > high_int,1,0)) %>%
-    ggplot(aes(x = participant_id, y = mean, ymin = mean-se, ymax = mean+se, col = as.factor(outlier)))+
+    ggplot(aes(x = subject, y = mean, ymin = mean-se, ymax = mean+se, col = as.factor(outlier)))+
     facet_wrap(~measure, scales = "free")+theme_minimal()+geom_pointrange()
 
-  badids = dd %>% filter(measure == "correct" & outlier == 1) %>% .$participant_id
+  badids = dd %>% filter(outlier == 1) %>% .$subject
 
-  df%>% filter(cohort == "vmp1") %>%
-    filter(subject %in% remover(df%>% filter(cohort == "vmp1")))
+  plotdf = inner_join(outlier_labels, df %>% filter(subject %in% badids)) %>%
+    mutate(subject = paste0(subject," ", flag))
 
-  return()
+  Group_plot(plotdf)
+
+
+  n_subj <- length(unique(plotdf %>% .$subject))
+
+  subject_chunks <- split(unique(plotdf$subject), ceiling(seq_along(1:n_subj) / 7))
+
+  badsubject_plots <- lapply(subject_chunks, function(chunk) plot_subjects(plotdf, chunk, bin = 7))
+  badsubject_plots
+
+  return(list(plotallsubj,badsubject_plots, badids))
 }
 
 
 
 
 
+check_modeltype = function(ACC,modeltype,conf){
+
+  if(modeltype == "pure" & ACC == T, conf = "ord_beta"){
+    mod = cmdstan_model(here::here("Stanmodels","Confidence_ACC.stan"))
+
+  }else if(modeltype == "meta_un" & ACC == T, conf = "ord_beta"){
+    mod =
+  }else if(modeltype == "meta_un_rt_un" & ACC == T, conf = "ord_beta"){
+    mod =
+  }else if(modeltype == "pure" & ACC == F, conf = "ord_beta"){
+    mod = cmdstan_model(here::here("Stanmodels","Confidence_Standard.stan"))
+  }else if(modeltype == "meta_un" & ACC == F, conf = "ord_beta"){
+    mod =
+  }else if(modeltype == "meta_un_rt_un" & ACC == F, conf = "ord_beta"){
+    mod =
+  }
+
+  return(mod)
+
+}
 
 
 
-
-fit_data_copula_rt = function(df,ACC, outputname){
+fit_data_copula_rt = function(df,ACC, outputname,modeltype,conf){
 
 
   df$subject = as.numeric(as.factor(df$subject))
@@ -47,11 +109,7 @@ fit_data_copula_rt = function(df,ACC, outputname){
   # Calculate the start points
   starts <- c(1, head(ends, -1) + 1)
 
-  if(ACC){
-  mod = cmdstan_model(here::here("Stanmodels","Confidence_ACC.stan"))
-  }else{
-  mod = cmdstan_model(here::here("Stanmodels","Confidence_Standard.stan"))
-  }
+  mod = check_modeltype(ACC,modeltype)
 
   datastan = list(N = nrow(df),
                   S = length(unique(df$subject)),

@@ -29,9 +29,6 @@ Group_plot = function(df, bin = F){
       geom_vline(xintercept = 0, linetype = 2)+
       theme(legend.position = "top")
   }else{
-
-
-
     plot = bind_rows(
       df %>%
         mutate(X_bin = cut(X, bin)) %>%
