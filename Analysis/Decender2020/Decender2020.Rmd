@@ -108,14 +108,14 @@ plots
 ```{r}
 
 fit0 = fit_data_copula_rt(df %>% filter(t2duration == 0 & !subject %in% t2duration0_remover) %>% mutate(Confidence = Confidence -3),
-                          ACC = T, 
+                          ACC = T,
                           "T2_0",
                           modeltype = "pure",
                           conf = "discrete_conf")
 
 
 fit01 = fit_data_copula_rt(df %>% filter(t2duration == 0 & !subject %in% t2duration0_remover) %>% mutate(Confidence = Confidence -3),
-                           ACC = T, 
+                           ACC = T,
                            "T2_0",
                            modeltype = "meta_un",
                            conf = "discrete_conf")
@@ -134,42 +134,42 @@ fit0 = fit_data_copula_rt(df %>% filter(t2duration == 1),
                           modeltype = "pure",
                           conf = "discrete_conf")
 
-
-fit01 = fit_data_copula_rt(df %>% filter(t2duration == 1),
-                           ACC = T, 
-                           "T2_1",
-                           modeltype = "meta_un",
-                           conf = "discrete_conf")
-
-
-fit02 = fit_data_copula_rt(df %>% filter(t2duration == 1),
-                           ACC = T,
-                           "T2_1",
-                           modeltype = "meta_un_rt_un",
-                           conf = "discrete_conf")
-
-
-
-
-fit0 = fit_data_copula_rt(df %>% filter(t2duration == 2),
-                          ACC = T, 
-                          "T2_1",
-                          modeltype = "pure",
-                          conf = "discrete_conf")
-
-
-fit01 = fit_data_copula_rt(df %>% filter(t2duration == 2),
-                           ACC = T, 
-                           "T2_1",
-                           modeltype = "meta_un",
-                           conf = "discrete_conf")
-
-
-fit02 = fit_data_copula_rt(df %>% filter(t2duration == 2),
-                           ACC = T,
-                           "T2_1",
-                           modeltype = "meta_un_rt_un",
-                           conf = "discrete_conf")
+# 
+# fit01 = fit_data_copula_rt(df %>% filter(t2duration == 1),
+#                            ACC = T, 
+#                            "T2_1",
+#                            modeltype = "meta_un",
+#                            conf = "discrete_conf")
+# 
+# 
+# fit02 = fit_data_copula_rt(df %>% filter(t2duration == 1),
+#                            ACC = T,
+#                            "T2_1",
+#                            modeltype = "meta_un_rt_un",
+#                            conf = "discrete_conf")
+# 
+# 
+# 
+# 
+# fit0 = fit_data_copula_rt(df %>% filter(t2duration == 2),
+#                           ACC = T, 
+#                           "T2_1",
+#                           modeltype = "pure",
+#                           conf = "discrete_conf")
+# 
+# 
+# fit01 = fit_data_copula_rt(df %>% filter(t2duration == 2),
+#                            ACC = T, 
+#                            "T2_1",
+#                            modeltype = "meta_un",
+#                            conf = "discrete_conf")
+# 
+# 
+# fit02 = fit_data_copula_rt(df %>% filter(t2duration == 2),
+#                            ACC = T,
+#                            "T2_1",
+#                            modeltype = "meta_un_rt_un",
+#                            conf = "discrete_conf")
 ```
 
 

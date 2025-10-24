@@ -2,8 +2,9 @@ functions {
 
 
   real psycho_ACC(real x, real alpha, real beta, real lapse){
-   return (0.5 + (0.5 * (1-2*lapse)) * (tanh(beta*(x-alpha))  / 2 + 0.5));
-  }
+   return (0.5+0.5*((1-2*lapse) * inv_logit(beta * (x - alpha))));
+
+   }
 
   real entropy(real p){
     return(-p * log(p) - (1-p) * log(1-p));
@@ -99,7 +100,7 @@ functions {
 
 
     vector[S] alpha = (param[,1]);
-    vector[S] beta = exp(param[,2]);
+    vector[S] beta = (param[,2]);
     vector[S] lapse = inv_logit(param[,3]) / 2;
 
 
@@ -113,7 +114,7 @@ functions {
     for (n in 1:N) {
 
       int K = size(cutpoints[S_id[n]]) + 1;  // Number of categories
-      real theta = psycho_ACC(X[n], alpha[S_id[n]], beta[S_id[n]] + meta_un[S_id[n]], lapse[S_id[n]]);
+      real theta = psycho_ACC(X[n], alpha[S_id[n]], exp(beta[S_id[n]] + meta_un[S_id[n]]), lapse[S_id[n]]);
 
 
       if (is_upper == 0) {  // Lower bound
@@ -248,7 +249,7 @@ transformed parameters{
   }
 
   vector[S] alpha = (param[,1]);
-  vector[S] beta = exp(param[,2]);
+  vector[S] beta = (param[,2]);
   vector[S] lapse = inv_logit(param[,3]) / 2;
 
   vector[S] conf_ACC = param[,4];
@@ -271,9 +272,9 @@ transformed parameters{
   profile("likelihood") {
   for (n in 1:N) {
   theta[n] = psycho_ACC(X[n], alpha[S_id[n]], beta[S_id[n]], lapse[S_id[n]]);
-  entropy_t[n] = entropy(psycho_ACC(X[n], alpha[S_id[n]], beta[S_id[n]] + meta_unrt[S_id[n]], lapse[S_id[n]]));
+  entropy_t[n] = entropy(psycho_ACC(X[n], alpha[S_id[n]], exp(beta[S_id[n]] + meta_unrt[S_id[n]]), lapse[S_id[n]]));
 
-  entropy_conf[n] = entropy(psycho_ACC(X[n], alpha[S_id[n]], beta[S_id[n]] + meta_un[S_id[n]], lapse[S_id[n]]));
+  entropy_conf[n] = entropy(psycho_ACC(X[n], alpha[S_id[n]], exp(beta[S_id[n]] + meta_un[S_id[n]]), lapse[S_id[n]]));
 
   }
 
