@@ -107,11 +107,11 @@ plots
 
 ```{r}
 
-fit0 = fit_data_copula_rt(df %>% filter(t2duration == 0 & !subject %in% t2duration0_remover) %>% mutate(Confidence = Confidence -3),
-                          ACC = T,
-                          "T2_0",
-                          modeltype = "pure",
-                          conf = "discrete_conf")
+# fit0 = fit_data_copula_rt(df %>% filter(t2duration == 0 & !subject %in% t2duration0_remover) %>% mutate(Confidence = Confidence -3),
+#                           ACC = T,
+#                           "T2_0",
+#                           modeltype = "pure",
+#                           conf = "discrete_conf")
 
 
 fit01 = fit_data_copula_rt(df %>% filter(t2duration == 0 & !subject %in% t2duration0_remover) %>% mutate(Confidence = Confidence -3),
