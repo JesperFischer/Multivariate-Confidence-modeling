@@ -1,0 +1,210 @@
+---
+title: "Quality check for contributions to the Confidence Database"
+author:
+- Code written by Doby Rahnev. 
+- Translated to R by Elisa Filevich.
+date: last updated 14 Nov 2019
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float:
+      collapsed: false
+---
+
+# Notes
+Please, run this file as a basic quality check for your contribution(s). 
+Note that this file will not catch all potential errors and you should 
+carefully inspect your contribution before sending it. 
+
+## Instructions
+- Place this file and all files you're sending in a new folder. 
+- Knit this file and look at the HTML output. If there are any errors or warnings, update your files until you have addressed all issues.
+- Send your contribution(s) and note that you ran this quality check. 
+
+```{r setup, include=FALSE}
+rm(list=ls())
+
+#Install and/or load necessary libraries
+requiredPackages <- c("readr", "dplyr", "here", "stringr", "kableExtra", "readxl")
+new.packages <- requiredPackages[!(requiredPackages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+lapply(requiredPackages, require, character.only = TRUE)
+
+# To print text in a different colour
+library(kableExtra)
+options(knitr.table.format = "html")
+
+knitr::opts_chunk$set(warning = FALSE, echo=FALSE)
+
+#Set data path 
+rootPath = dirname(here("quality_check.Rmd"))
+dataPath = paste0(rootPath, "/")
+
+#Define custom functions
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+loadConfidenceData <- function(path, dataOfInterest, verbose=FALSE) { 
+  files <- list.files(path=dataPath,pattern = "data_*", recursive = TRUE)
+  tables <- lapply(paste(dataPath,files[dataOfInterest],sep='/'), 
+                   readr::read_csv,col_types = readr::cols_only(Subj_idx='c'
+                                                                ,Stimulus='c'
+                                                                ,Response='c'
+                                                                ,Confidence = 'n'
+                                                                ,RT_dec = 'n'
+                                                                ,RT_conf = 'n'
+                                                                ,RT_decConf = 'n'
+                   )
+  ) 
+  #Add some info on dataset source as a column
+  tables <- mapply(mutate, tables, 
+                   "dataset_name" = as.character(substr(files[dataOfInterest],1,nchar(files[dataOfInterest])-4),
+                                                 stringsAsFactors=FALSE),
+                   SIMPLIFY=F)
+  if(verbose){
+    writeLines(paste0('\nBelow is how the data from each dataset are being read in.\n',
+                      'Please check that columns that should be numeric are indeed numeric. ',
+                      'If not, this most likely indicates a problem with the formatting of the data.\n'))
+    
+    print(tables)
+  }
+  
+  #Bind all datasets together into a single one
+  do.call(dplyr::bind_rows, tables)
+}
+
+#Get the files that will be read in
+data_files <- list.files(path=dataPath,pattern = "^data_*", recursive = FALSE)
+readme_files <- list.files(path=dataPath,pattern = "^readme_*", recursive = FALSE)
+
+#Load spreadsheet
+T <- readxl::read_xlsx(paste0(dataPath,'Spreadsheet_template.xlsx'));
+n_datasets = length(T$Name_in_database);
+names_in_spreadsheet = sort(T$Name_in_database);
+```
+
+# Do sanity checks
+## Determine if equal number of files are present in the spredsheet, data and readme
+```{r compareNumberOfEntries}
+
+message.numberEntries <- paste0('# entries in spreadsheet: ', length(names_in_spreadsheet),
+                  '\n# data files: ', length(data_files) ,
+                  '\n# readme files: ', length(readme_files), '\n')
+
+if(length(data_files) != length(names_in_spreadsheet) || length(data_files) != length(readme_files)){
+  message.numberEntries <- paste0(message.numberEntries, '\n\nERROR. Number of files do not match!\n')
+}
+```
+`r text_spec(message.numberEntries, color = "red")`
+
+## Determine if all names match
+```{r compareNamesOfEntries}
+
+if (any(names_in_spreadsheet != sapply(data_files, str_sub, start=6, end=-5)) || 
+    any(names_in_spreadsheet != sapply(readme_files, str_sub, start=8, end=-5))){
+  
+  mismatches <- unique(c(which(names_in_spreadsheet != sapply(data_files, str_sub, start=6, end=-5)),
+                         which(names_in_spreadsheet != sapply(readme_files, str_sub, start=8, end=-5))))
+  
+  message.namesEntries <- paste0('\n\nERROR. Name does not match!',
+                    '\nName in spreadsheet: ', names_in_spreadsheet[mismatches],
+                    '\nName in data files: ', sapply(data_files[mismatches], str_sub, start=6, end=-5) ,
+                    '\nName in readme files: ', sapply(readme_files[mismatches], str_sub, start=8, end=-5) , '\n')
+} else {
+  message.namesEntries <- paste0('\nNames are consistent between the files and the spreadsheet.\n')
+}
+```
+`r text_spec(message.namesEntries, color = "red")`
+
+
+## Determine if data are loading well and if fields are named correctly
+```{r checkFieldNames}
+
+message.fieldnames <- character(0)
+
+#Read data in one by one
+for (dataset_num in c(1:length(data_files))){
+  thisDataset <- loadConfidenceData(dataPath, dataset_num, verbose=TRUE)
+
+  #Check if different fields are present and give warnings if not
+  if ("Subj_idx" %!in% names(thisDataset)){
+    message.fieldnames <- paste0(message.fieldnames, '\n\nERROR. No field "Subj_idx" exists in ', str_sub(data_files[dataset_num], start=6, end=-5), '. A field "Subj_idx" MUST be present in the dataset.\n')
+  }
+  if ("Stimulus" %!in% names(thisDataset)){
+     message.fieldnames <- paste0(message.fieldnames, '\n\nWARNING! No field "Stimulus" exists in ', str_sub(data_files[dataset_num], start=6, end=-5), '. Please use the exact word "Stimulus" unless you have to use something else.\n\n')
+  }
+  if ("Response" %!in% names(thisDataset)){
+     message.fieldnames <- paste0(message.fieldnames, '\n\nWARNING! No field "Response" exists in ', str_sub(data_files[dataset_num], start=6, end=-5), '. Please use the exact word "Response" unless you have to use something else.\n\n')
+  }  
+  if ("Confidence" %!in% names(thisDataset)){
+     message.fieldnames <- paste0(message.fieldnames, '\n\nWARNING! No field "Confidence" exists in ', str_sub(data_files[dataset_num], start=6, end=-5), '. Please use the exact word "Confidence" unless you have to use something else.\n\n')
+  }  
+  if ("RT_dec" %!in% names(thisDataset) && "RT_decConf" %!in% names(thisDataset)){
+     message.fieldnames <- paste0(message.fieldnames, '\n\nWARNING! No field "RT_dec" or "RT_decConf" exists in ', str_sub(data_files[dataset_num], start=6, end=-5), '. Please use the exact word "RT_dec" or "RT_decConf" unless you have to use something else.\n\n')
+  }  
+  if ("RT_conf" %!in% names(thisDataset) && "RT_decConf" %!in% names(thisDataset)){
+     message.fieldnames <- paste0(message.fieldnames, '\n\nWARNING! No field "RT_dec" or "RT_decConf" exists in ', str_sub(data_files[dataset_num], start=6, end=-5), '. Please use the exact word "RT_dec" or "RT_decConf" unless you have to use something else.\n\n')
+  }  
+}
+```
+`r text_spec('\n-----Checking if the data are loading well and if data columns have correct names.------\n', color = "red")`
+`r text_spec(message.fieldnames, color = "red")`
+
+## Determine if number of subjects are reported correctly in spreadsheet
+```{r checkNumberOfSubjs}
+message.numberSubjs <- character(0)
+
+for (dataset_num in c(1:length(data_files))){
+  
+  #Load the dataset
+  thisDataset <- loadConfidenceData(dataPath, dataset_num, verbose=FALSE)
+  
+  #Display basic info
+  message.numberSubjs <- paste0(message.numberSubjs, '\n\nDataset name: ', thisDataset$dataset_name[1],
+                    '\nNumber of subjects reported in spreadsheet: ', T$Num_subjects[dataset_num], 
+                    '\nNumber of actual subjects in data: ', length(unique(thisDataset$Subj_idx)), '\n\n')
+  
+  #Check for inconsistencies in number of subjects
+  if (T$Num_subjects[dataset_num] != length(unique(thisDataset$Subj_idx))){
+    message.numberSubjs <- paste0(message.numberSubjs, '\n\nERROR. Number of subjects does not match between spreadsheet and actual data.\n\n')
+  }
+}
+
+```
+`r text_spec('\n-----Checking if reported number of subjects is correct.------\n', color = "red")`
+`r text_spec(message.numberSubjs, color = "red")`
+
+## Determine if number of trials per subject are reported correctly in spreadsheet
+```{r checkNumberOfTrials}
+
+message.numberTrials <- character(0)
+
+for (dataset_num in c(1:length(data_files))){
+  
+  #Load the dataset
+  thisDataset <- loadConfidenceData(dataPath, dataset_num, verbose=FALSE)
+  
+  #Determine the number of trials per subject 
+  numOfTrials_summary <- thisDataset %>% 
+    group_by(Subj_idx) %>%
+    summarise(trials_per_subj = length(Subj_idx)) 
+  
+  #Print all rows
+  numOfTrials_summary %>%
+    print(n = Inf) 
+  
+  #Get what is reported in the spreadsheet
+  min_num_trials_reported = T$Min_trials_per_subject[dataset_num]
+  max_num_trials_reported = T$Max_trials_per_subject[dataset_num]
+
+  #Display info
+  message.numberTrials <- paste0(message.numberTrials, names_in_spreadsheet[dataset_num], 
+           '\nMin total trials per subject reported in spreadsheet: ', min_num_trials_reported,
+           '\nMin total trials per subject in the actual data: ', min(numOfTrials_summary$trials_per_subj),
+           '\nMax total trials per subject reported in spreadsheet: ', max_num_trials_reported,
+           '\nMax total trials per subject in the actual data: ', max(numOfTrials_summary$trials_per_subj),
+           '\nPLEASE CHECK IF THESE VALUES ARE CORRECT!\n\n')
+}
+```
+`r text_spec('\n-----Checking if reported number of trials per subject is correct.------\n\n', color = "red")`
+`r text_spec(message.numberTrials, color = "red")`
