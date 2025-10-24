@@ -56,17 +56,21 @@ remover = function(df){
   plotdf = inner_join(outlier_labels, df %>% filter(subject %in% badids)) %>%
     mutate(subject = paste0(subject," ", flag))
 
-  Group_plot(plotdf)
+  if(nrow(plotdf) != 0){
+    Group_plot(plotdf)
+
+    n_subj <- length(unique(plotdf %>% .$subject))
+
+    subject_chunks <- split(unique(plotdf$subject), ceiling(seq_along(1:n_subj) / 5))
+
+    badsubject_plots <- lapply(subject_chunks, function(chunk) plot_subjects(plotdf, chunk, bin = 7))
+    badsubject_plots
+
+    return(list(plotallsubj,badsubject_plots, badids))
+  }
+  return(list(plotallsubj))
 
 
-  n_subj <- length(unique(plotdf %>% .$subject))
-
-  subject_chunks <- split(unique(plotdf$subject), ceiling(seq_along(1:n_subj) / 5))
-
-  badsubject_plots <- lapply(subject_chunks, function(chunk) plot_subjects(plotdf, chunk, bin = 7))
-  badsubject_plots
-
-  return(list(plotallsubj,badsubject_plots, badids))
 }
 
 
@@ -105,13 +109,13 @@ check_modeltype = function(ACC,modeltype,conf){
     mod = cmdstan_model(here::here("Stanmodels","Discrete Confidence","ACC_Bin_RT_Discrete_conf_metaun_rt_un.stan"))
 
   }else if(modeltype == "pure" & ACC == F & conf == "discrete_conf"){
-    mod = NA
+    mod = cmdstan_model(here::here("Stanmodels","Discrete Confidence","Resp_Bin_RT_Discrete_conf.stan"))
 
   }else if(modeltype == "meta_un" & ACC == F & conf == "discrete_conf"){
-    mod = NA
+    mod = cmdstan_model(here::here("Stanmodels","Discrete Confidence","Resp_Bin_RT_Discrete_conf_metaun.stan"))
 
   }else if(modeltype == "meta_un_rt_un" & ACC == F & conf == "discrete_conf"){
-    mod = NA
+    mod = cmdstan_model(here::here("Stanmodels","Discrete Confidence","Resp_Bin_RT_Discrete_conf_metaun_rt_un.stan"))
   }
 
 
