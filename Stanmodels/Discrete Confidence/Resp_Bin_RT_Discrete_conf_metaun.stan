@@ -289,6 +289,7 @@ model {
   gm[6] ~ normal(0,10); //global mean of beta
 
   gm[7:9] ~ normal(0,2); //global mean of beta
+  gm[10] ~ normal(0,2); //global mean of beta
 
   to_vector(z_expo) ~ std_normal();
 
@@ -300,6 +301,7 @@ model {
   tau_u[6] ~ normal(0 , 3);
 
   tau_u[7:9] ~ normal(0 , 3);
+  tau_u[10] ~ normal(0 , 3);
 
   L_u ~ lkj_corr_cholesky(2);
 
