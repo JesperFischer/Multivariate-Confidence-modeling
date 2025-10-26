@@ -77,7 +77,7 @@ remover = function(df){
 
 
 
-check_modeltype = function(ACC,modeltype,conf){
+check_modeltype = function(ACC,modeltype,conf,VMP){
 
   if(modeltype == "pure" & ACC == T & conf == "ord_beta"){
     mod = cmdstan_model(here::here("Stanmodels","Confidence_ACC.stan"))
@@ -96,6 +96,16 @@ check_modeltype = function(ACC,modeltype,conf){
 
   }else if(modeltype == "meta_un_rt_un" & ACC == F & conf == "ord_beta"){
     mod = cmdstan_model(here::here("Stanmodels","Resp_Bin_RT_Contin_Conf_metaun_rt_un.stan"))
+
+
+  }else if(modeltype == "pure" & ACC == F & conf == "ord_beta" & VMP == T){
+    mod = cmdstan_model(here::here("Stanmodels","VMP_Resp_Bin_RT_Contin_Conf.stan"))
+
+  }else if(modeltype == "meta_un" & ACC == F & conf == "ord_beta" & VMP == T){
+    mod = cmdstan_model(here::here("Stanmodels","VMP_Resp_Bin_RT_Contin_Conf_metaun.stan"))
+
+  }else if(modeltype == "meta_un_rt_un" & ACC == F & conf == "ord_beta" & VMP == T){
+    mod = cmdstan_model(here::here("Stanmodels","VMP_Resp_Bin_RT_Contin_Conf_metaun_rt_un.stan"))
   }
 
 
@@ -139,7 +149,7 @@ fit_data_copula_rt = function(df,ACC, outputname,modeltype,conf){
   # Calculate the start points
   starts <- c(1, head(ends, -1) + 1)
 
-  mod = check_modeltype(ACC,modeltype,conf)
+  mod = check_modeltype(ACC,modeltype,conf,VMP = grepl("VMP",outputname))
 
   datastan = list(N = nrow(df),
                   S = length(unique(df$subject)),
