@@ -100,7 +100,7 @@ models <- c("pure", "meta_un", "meta_un_rt_un")
 names(models) <- c("VMP1_pure", "VMP1_metaun", "VMP1_metaun_rtun")
 
 # Set up the plan for parallel processing
-plan(multisession)  # Use multisession for parallel processing
+plan(multisession, workers = 4)  # Use multisession for parallel processing
 
 # Fit the models in parallel
 fits <- future_map(names(models), ~ {
