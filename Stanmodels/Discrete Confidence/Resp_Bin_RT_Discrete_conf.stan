@@ -58,14 +58,14 @@ functions {
 
 
     vector[S] alpha = (param[,1]);
-    vector[S] beta = exp(param[,2]);
+    vector[S] beta = (param[,2]);
     vector[S] lapse = inv_logit(param[,3]) / 2;
 
 
 
 
     for (n in 1:N) {
-      real theta = psycho(X[n], alpha[S_id[n]], beta[S_id[n]], lapse[S_id[n]]);
+      real theta = psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]);
       if (is_upper == 0) {
         u_bounds[n, 1] = binom_y[n] == 0.0
                           ? 0.0 : binomial_cdf(binom_y[n] - 1 | 1, theta);
@@ -100,7 +100,7 @@ functions {
 
 
     vector[S] alpha = (param[,1]);
-    vector[S] beta = exp(param[,2]);
+    vector[S] beta = (param[,2]);
     vector[S] lapse = inv_logit(param[,3]) / 2;
 
 
@@ -113,7 +113,7 @@ functions {
     for (n in 1:N) {
 
       int K = size(cutpoints[S_id[n]]) + 1;  // Number of categories
-      real theta = psycho(X[n], alpha[S_id[n]], beta[S_id[n]], lapse[S_id[n]]);
+      real theta = psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]);
 
 
       if (is_upper == 0) {  // Lower bound
@@ -249,7 +249,7 @@ transformed parameters{
   }
 
   vector[S] alpha = (param[,1]);
-  vector[S] beta = exp(param[,2]);
+  vector[S] beta = (param[,2]);
   vector[S] lapse = inv_logit(param[,3]) / 2;
 
   vector[S] conf_ACC = param[,4];
@@ -268,7 +268,7 @@ transformed parameters{
 
   profile("likelihood") {
   for (n in 1:N) {
-  theta[n] = psycho(X[n], alpha[S_id[n]], beta[S_id[n]], lapse[S_id[n]]);
+  theta[n] = psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]);
 
   entropy_t[n] = entropy(theta[n]);
 

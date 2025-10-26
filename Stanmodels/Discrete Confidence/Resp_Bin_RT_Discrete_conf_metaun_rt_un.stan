@@ -58,14 +58,14 @@ functions {
 
 
     vector[S] alpha = (param[,1]);
-    vector[S] beta = exp(param[,2]);
+    vector[S] beta = (param[,2]);
     vector[S] lapse = inv_logit(param[,3]) / 2;
 
 
 
 
     for (n in 1:N) {
-      real theta = psycho(X[n], alpha[S_id[n]], beta[S_id[n]], lapse[S_id[n]]);
+      real theta = psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]);
       if (is_upper == 0) {
         u_bounds[n, 1] = binom_y[n] == 0.0
                           ? 0.0 : binomial_cdf(binom_y[n] - 1 | 1, theta);
@@ -100,7 +100,7 @@ functions {
 
 
     vector[S] alpha = (param[,1]);
-    vector[S] beta = exp(param[,2]);
+    vector[S] beta = (param[,2]);
     vector[S] lapse = inv_logit(param[,3]) / 2;
 
 
@@ -249,7 +249,7 @@ transformed parameters{
   }
 
   vector[S] alpha = (param[,1]);
-  vector[S] beta = exp(param[,2]);
+  vector[S] beta = (param[,2]);
   vector[S] lapse = inv_logit(param[,3]) / 2;
 
   vector[S] conf_ACC = param[,4];
@@ -271,7 +271,7 @@ transformed parameters{
 
   profile("likelihood") {
   for (n in 1:N) {
-  theta[n] = psycho(X[n], alpha[S_id[n]], beta[S_id[n]], lapse[S_id[n]]);
+  theta[n] = psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]);
   entropy_t[n] = entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]] + meta_unrt[S_id[n]]), lapse[S_id[n]]));
 
   entropy_conf[n] = entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]] + meta_un[S_id[n]]), lapse[S_id[n]]));
@@ -388,7 +388,7 @@ generated quantities {
 
     log_lik_rt[n] = lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n], rt_prec[S_id[n]]);
 
-    log_lik_conf[n] = ordered_logistic_lpmf(Conf[n] | ACC[n] * conf_ACC[S_id[n]] + conf_entropy[S_id[n]] * entropy_t[n] + ACC[n]*entropy_t[n]*conf_entropy_ACC[S_id[n]], cutpoints[S_id[n]]);
+    log_lik_conf[n] = ordered_logistic_lpmf(Conf[n] | ACC[n] * conf_ACC[S_id[n]] + conf_entropy[S_id[n]] * entropy_conf[n] + ACC[n]*entropy_conf[n]*conf_entropy_ACC[S_id[n]], cutpoints[S_id[n]]);
 
     log_lik[n] = log_lik_bin[n] + log_lik_rt[n] + log_lik_cop[n];
   }

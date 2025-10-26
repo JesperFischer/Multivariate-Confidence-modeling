@@ -159,8 +159,8 @@ fit_data_copula_rt = function(df,ACC, outputname,modeltype,conf){
   cor <-mod$sample(
     data = datastan,
     refresh = 10,
-    iter_sampling = 500,
-    iter_warmup = 500,
+    iter_sampling = 10,
+    iter_warmup = 10,
     adapt_delta = 0.95,
     max_treedepth = 12,
     init  = 0,

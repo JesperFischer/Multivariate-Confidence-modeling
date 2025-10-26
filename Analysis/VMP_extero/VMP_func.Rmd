@@ -125,8 +125,9 @@ fit2 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers
 
 
 ```{r}
-pred0 = Get_predictive(fit0,df %>% filter(cohort == "vmp1"), n_draws = 10)
-pred1 = Get_predictive(fit1,df %>% filter(cohort == "vmp2"), n_draws = 10)
+pred_pure = Get_predictive(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 10, model = "pure")
+
+pred_full = Get_predictive(full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 10, model = "full")
 ```
 
 
@@ -135,40 +136,67 @@ pred1 = Get_predictive(fit1,df %>% filter(cohort == "vmp2"), n_draws = 10)
 
 
 ```{r, fig.height=7, fig.width=12}
-bin_0 = Plot_bin(pred0,df %>% filter(cohort == "vmp1"))
-bin_1 = Plot_bin(pred1,df %>% filter(cohort == "vmp2"))
+bin_pure = Plot_bin(pred_pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), ACC = F)
 
-bin_0[[1]]+ggtitle("t2_0")
-bin_1[[1]]+ggtitle("t2_1")
-bin_2[[1]]+ggtitle("t2_2")
+bin_pure[[1]]+ggtitle("pure")
+bin_pure[[2]]+ggtitle("pure")
 
+bin_full = Plot_bin(pred_full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), ACC = F)
+bin_full[[1]]+ggtitle("full")
+bin_full[[2]]+ggtitle("full")
 
-bin_0[[2]]+ggtitle("t2_0")
-bin_1[[2]]+ggtitle("t2_1")
-bin_2[[2]]+ggtitle("t2_2")
 
 ```
 
 
 ```{r, fig.height=7, fig.width=12}
-rt_0 = Plot_RT(pred0,df %>% filter(cohort == "vmp1"))
-rt_1 = Plot_RT(pred1,df %>% filter(cohort == "vmp2"))
-rt_2 = Plot_RT(pred2,df %>% filter(t2duration == 2))
-rt_0[[1]]+ggtitle("t2_0")
-rt_1[[1]]+ggtitle("t2_1")
-rt_2[[1]]+ggtitle("t2_2")
+rt_pure = Plot_RT(pred_pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), bin = 7)
+rt_pure[[1]]+ggtitle("pure")
+rt_pure[[2]]+ggtitle("pure")
+rt_pure[[3]]+ggtitle("pure")
 
 
-rt_0[[2]]+ggtitle("t2_0")
-rt_1[[2]]+ggtitle("t2_1")
-rt_2[[2]]+ggtitle("t2_2")
 
 
-rt_0[[3]]+ggtitle("t2_0")
-rt_1[[3]]+ggtitle("t2_1")
-rt_2[[3]]+ggtitle("t2_2")
+rt_full = Plot_RT(pred_full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), bin = 7)
+rt_full[[1]]+ggtitle("full")
+rt_full[[2]]+ggtitle("full")
+rt_full[[3]]+ggtitle("full")
 ```
 
 
+
+
+
+
+```{r, fig.height=7, fig.width=12}
+conf_pure = Plot_conf(pred_pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), bin = 7)
+conf_pure[[1]]+ggtitle("pure")
+conf_pure[[2]]+ggtitle("pure")
+
+
+
+
+conf_full = Plot_conf(pred_full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), bin = 7)
+conf_full[[1]]+ggtitle("full")
+conf_full[[2]]+ggtitle("full")
+```
+
+
+
+
+```{r}
+pred_pure = Get_predictive_group(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "pure")
+
+pred_full = Get_predictive_group(full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "full")
+```
+
+
+```{r, fig.width= 12, fig.height=7, message=FALSE,warning=FALSE}
+group_predictive(pred_pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))
+
+group_predictive(pred_full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))
+
+```
 
 

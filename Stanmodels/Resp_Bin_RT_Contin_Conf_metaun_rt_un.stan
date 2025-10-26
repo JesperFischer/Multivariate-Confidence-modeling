@@ -61,14 +61,14 @@ functions {
 
 
     vector[S] alpha = (param[,1]);
-    vector[S] beta = exp(param[,2]);
+    vector[S] beta = (param[,2]);
     vector[S] lapse = inv_logit(param[,3]) / 2;
 
 
 
 
     for (n in 1:N) {
-      real theta = psycho(X[n], alpha[S_id[n]], beta[S_id[n]], lapse[S_id[n]]);
+      real theta = psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]);
       if (is_upper == 0) {
         u_bounds[n, 1] = binom_y[n] == 0.0
                           ? 0.0 : binomial_cdf(binom_y[n] - 1 | 1, theta);
@@ -251,7 +251,7 @@ transformed parameters{
 
   profile("likelihood") {
   for (n in 1:N) {
-  theta[n] = psycho(X[n], alpha[S_id[n]], beta[S_id[n]], lapse[S_id[n]]);
+  theta[n] = psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]);
 
   entropy_t[n] = entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]] + rt_un[S_id[n]]), lapse[S_id[n]]));
 
@@ -260,7 +260,6 @@ transformed parameters{
   conf_mu[n] = conf_int[S_id[n]] +                                           // intercept
     conf_ACC[S_id[n]] * ACC[n] +                                  // main effect: ACC
     conf_entropy[S_id[n]] * entropy_conf[n] +                        // main effect: entropy
-
     conf_entropy_ACC[S_id[n]] * ACC[n] * entropy_conf[n];                 // 2-way interaction: ACC × entropy
   }
 
