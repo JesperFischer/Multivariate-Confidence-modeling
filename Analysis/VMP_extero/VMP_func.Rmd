@@ -217,7 +217,7 @@ pred_full_group_new_sub = Get_predictive_new_subject(full,df %>% filter(cohort =
 group_predictive(pred_pure_group,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
   labs(
     title = expression(paste("(PURE) Population mean predictions: E[Y | X, ", mu[theta], "], Uncertainty = Var(",mu[theta],")")),
-    subtitle = "Expected response for the population",
+    subtitle = "Expected response for the population; Where is the mean?",
     caption = "Model predictions for the expected population mean response. 
     Lines ([95 , 90 , 80]% CI) show the posterior mean of the expected value,
     reflecting uncertainty in the group-level parameters."
@@ -227,7 +227,7 @@ group_predictive(pred_pure_group,df %>% filter(cohort == "vmp1"& !subject %in% r
 group_predictive(pred_full_group,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
   labs(
     title = expression(paste("(FULL) Population mean predictions: E[Y | X, ", mu[theta], "], Uncertainty = Var(",mu[theta],")")),
-    subtitle = "Expected response for the population",
+    subtitle = "Expected response for the population; Where is the mean?",
     caption = "Model predictions for the expected population mean response. 
     Lines ([95 , 90 , 80]% CI) show the posterior mean of the expected value,
     reflecting uncertainty in the group-level parameters."
@@ -237,6 +237,7 @@ group_predictive(pred_full_group,df %>% filter(cohort == "vmp1"& !subject %in% r
 
 
 ```{r}
+
 group_predictive(pred_full_group_new_sub,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
   labs(
     title = expression(paste(
@@ -244,7 +245,7 @@ group_predictive(pred_full_group_new_sub,df %>% filter(cohort == "vmp1"& !subjec
       "E[Y | X, ", theta[s], "] where ", 
       theta[s], " ~ MVN(", mu[theta], ", ", Sigma, ")"
     )),
-    subtitle = "Expected response for hypothetical subjects from the population",
+    subtitle = "Expected response for hypothetical subjects from the population; Where are individuals",
     caption = "Credibility intervals reflect two sources of uncertainty:
 (1) Parameter uncertainty: Var(μ_θ, Σ), from posterior draws
 (2) Population heterogeneity: Var(θ_s | μ_θ, Σ) - from sampling new subjects."
@@ -258,7 +259,7 @@ group_predictive(pred_pure_group_new_sub,df %>% filter(cohort == "vmp1"& !subjec
       "E[Y | X, ", theta[s], "] where ", 
       theta[s], " ~ MVN(", mu[theta], ", ", Sigma, ")"
     )),
-    subtitle = "Expected response for hypothetical subjects from the population",
+    subtitle = "Expected response for hypothetical subjects from the population; Where are individuals",
     caption = "Credibility intervals reflect two sources of uncertainty:
 (1) Parameter uncertainty: Var(μ_θ, Σ), from posterior draws
 (2) Population heterogeneity: Var(θ_s | μ_θ, Σ) - from sampling new subjects."
