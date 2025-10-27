@@ -258,36 +258,30 @@ model {
 
   rt_ndt ~ normal(0.3,0.05);
 
-  vector[N] entropy_t;
-
-  vector[N] conf_mu;
-  vector[N] theta;
-
-  for (n in 1:N) {
-  theta[n] = psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]);
-
-  entropy_t[n] = entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]));
-
-  conf_mu[n] = conf_int[S_id[n]] +                                           // intercept
-    conf_ACC[S_id[n]] * ACC[n] +                                  // main effect: ACC
-    conf_entropy[S_id[n]] * entropy_t[n] +                        // main effect: entropy
-
-    conf_entropy_ACC[S_id[n]] * ACC[n] * entropy_t[n];                 // 2-way interaction: ACC × entropy
-  }
 
 
 
   matrix[N, 3] u_mix;
   for (n in 1:N) {
+
+    real entropy_t = entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]));
+
+    real conf_mu = conf_int[S_id[n]] +                                           // intercept
+      conf_ACC[S_id[n]] * ACC[n] +                                  // main effect: ACC
+      conf_entropy[S_id[n]] * entropy_t +                        // main effect: entropy
+      conf_entropy_ACC[S_id[n]] * ACC[n] * entropy_t;                 // 2-way interaction: ACC × entropy
+
+    real rt_pred =  rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t + rt_stim[S_id[n]] * X[n];
+
     u_mix[n, 1] = u[n,1];
 
-    u_mix[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n] + rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
+    u_mix[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] |rt_pred, rt_prec[S_id[n]]);
 
-    u_mix[n, 3] = ord_beta_reg_cdf(Conf[n] | conf_mu[n], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
+    u_mix[n, 3] = ord_beta_reg_cdf(Conf[n] | conf_mu, conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
 
-    target += lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
+    target += lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_pred, rt_prec[S_id[n]]);
 
-    target += ord_beta_reg_lpdf(Conf[n] | conf_mu[n], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
+    target += ord_beta_reg_lpdf(Conf[n] | conf_mu, conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
 
     // target += binomial_lpmf(binom_y[n] | 1, theta[n]);
   }
