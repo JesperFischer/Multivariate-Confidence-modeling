@@ -99,13 +99,13 @@ check_modeltype = function(ACC,modeltype,conf,VMP){
 
 
   }else if(modeltype == "pure" & ACC == F & conf == "ord_beta" & VMP == T){
-    mod = cmdstan_model(here::here("Stanmodels","VMP_Resp_Bin_RT_Contin_Conf.stan"))
+    mod = cmdstan_model(here::here("Stanmodels","small VMP","VMP_Resp_Bin_RT_Contin_Conf_small.stan"))
 
   }else if(modeltype == "meta_un" & ACC == F & conf == "ord_beta" & VMP == T){
-    mod = cmdstan_model(here::here("Stanmodels","VMP_Resp_Bin_RT_Contin_Conf_metaun.stan"))
+    mod = cmdstan_model(here::here("Stanmodels","small VMP","VMP_Resp_Bin_RT_Contin_Conf_small_metaun.stan"))
 
   }else if(modeltype == "meta_un_rt_un" & ACC == F & conf == "ord_beta" & VMP == T){
-    mod = cmdstan_model(here::here("Stanmodels","VMP_Resp_Bin_RT_Contin_Conf_metaun_rt_un.stan"))
+    mod = cmdstan_model(here::here("Stanmodels","small VMP","VMP_Resp_Bin_RT_Contin_Conf_small_metaun_rt_un.stan"))
   }
 
 
@@ -168,8 +168,8 @@ fit_data_copula_rt = function(df,ACC, outputname,modeltype,conf){
   cor <-mod$sample(
     data = datastan,
     refresh = 10,
-    iter_sampling = 1000,
-    iter_warmup = 1000,
+    iter_sampling = 500,
+    iter_warmup = 500,
     adapt_delta = 0.95,
     max_treedepth = 12,
     init  = 0,

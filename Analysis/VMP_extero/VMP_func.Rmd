@@ -95,7 +95,7 @@ plots
 
 ```{r}
 
-df = df %>% filter(subject < 30)
+df = df %>% filter(subject < 10)
 models <- c("pure", "meta_un", "meta_un_rt_un")
 names(models) <- c("VMP1_pure", "VMP1_metaun", "VMP1_metaun_rtun")
 
