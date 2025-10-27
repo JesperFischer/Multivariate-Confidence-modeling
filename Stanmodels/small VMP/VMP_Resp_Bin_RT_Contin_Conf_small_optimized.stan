@@ -284,12 +284,6 @@ model {
       conf_entropy[s] .* entropy_t[starts[s]:ends[s]] +                        // main effect: entropy
       conf_entropy_ACC[s] .* ACC[starts[s]:ends[s]] .* entropy_t[starts[s]:ends[s]];                 // 2-way interaction: ACC × entropy
 
-    c0[s] ~ induced_dirichlet([1,10,1]', 0, 1, c0[s], c11[s]);
-    c11[s] ~ induced_dirichlet([1,10,1]', 0, 2, c0[s], c11[s]);
-
-    rho_chol[s] ~ lkj_corr_cholesky(2);
-
-    u_mix[starts[s]:ends[s],] ~ gauss_copula_cholesky(rho_chol[s]);
   }
 
   for (n in 1:N) {
@@ -306,6 +300,12 @@ model {
   }
   for(s in 1:S){
     target += lognormal_lpdf(RT[starts[s]:ends[s]] - rt_ndt[s] | rt_pred[starts[s]:ends[s]], rt_prec[s]);
+    c0[s] ~ induced_dirichlet([1,10,1]', 0, 1, c0[s], c11[s]);
+    c11[s] ~ induced_dirichlet([1,10,1]', 0, 2, c0[s], c11[s]);
+
+    rho_chol[s] ~ lkj_corr_cholesky(2);
+
+    u_mix[starts[s]:ends[s],] ~ gauss_copula_cholesky(rho_chol[s]);
   }
 
 }
