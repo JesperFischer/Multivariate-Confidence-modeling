@@ -1,6 +1,15 @@
 functions {
 
 
+  vector psycho_vec(vector x, real alpha, real beta, real lapse){
+    return (lapse + (1-2*lapse) * inv_logit(beta * (x - alpha)));
+
+  }
+
+  vector entropy_vec(vector p){
+    return(-p .* log(p) - (1-p) .* log(1-p));
+  }
+
   real psycho(real x, real alpha, real beta, real lapse){
     return (lapse + (1-2*lapse) * inv_logit(beta * (x - alpha)));
 
@@ -236,8 +245,7 @@ transformed parameters{
   vector[S] conf_entropy_ACC = param[,11];
   vector[S] conf_prec = exp(param[,12]);
 
-  // Pre-compute exp(beta) to avoid repeated expensive exp() calls
-  vector[S] beta_exp = exp(beta);
+
 
 }
 
@@ -259,46 +267,23 @@ model {
 
   rt_ndt ~ normal(0.3,0.05);
 
-
-
-
+  vector[N] rt_pred;
+  vector[N] entropy_t;
+  vector[N] conf_mu;
   matrix[N, 3] u_mix;
-  for (n in 1:N) {
-    // Cache subject ID to reduce indexing overhead
-    int sid = S_id[n];
-    
-    // Pre-compute psycho and entropy once per observation
-    real psycho_val = psycho(X[n], alpha[sid], beta_exp[sid], lapse[sid]);
-    real entropy_val = entropy(psycho_val);
-    
-    // Pre-compute ACC * entropy for interaction term
-    real acc_ent_interaction = ACC[n] * entropy_val;
+  u_mix[, 1] = u[,1];
 
-    real conf_mu = conf_int[sid] +                                           
-      conf_ACC[sid] * ACC[n] +                                  
-      conf_entropy[sid] * entropy_val +                        
-      conf_entropy_ACC[sid] * acc_ent_interaction;                 
 
-    real rt_pred =  rt_int[sid] + rt_slope[sid] * entropy_val + rt_stim[sid] * X[n];
-    
-    // Cache rt_ndt lookup
-    real rt_ndt_val = rt_ndt[sid];
-    real rt_adjusted = RT[n] - rt_ndt_val;
-
-    u_mix[n, 1] = u[n,1];
-
-    u_mix[n, 2] = lognormal_cdf(rt_adjusted | rt_pred, rt_prec[sid]);
-
-    u_mix[n, 3] = ord_beta_reg_cdf(Conf[n] | conf_mu, conf_prec[sid], c0[sid], c11[sid]);
-
-    target += lognormal_lpdf(rt_adjusted | rt_pred, rt_prec[sid]);
-
-    target += ord_beta_reg_lpdf(Conf[n] | conf_mu, conf_prec[sid], c0[sid], c11[sid]);
-
-    // target += binomial_lpmf(binom_y[n] | 1, theta[n]);
-  }
 
   for(s in 1:S){
+
+    entropy_t[starts[s]:ends[s]] = entropy_vec(psycho_vec(X[starts[s]:ends[s]], alpha[s], exp(beta[s]), lapse[s]));
+
+    conf_mu[starts[s]:ends[s]] = conf_int[s] +                                           // intercept
+      conf_ACC[s] .* ACC[starts[s]:ends[s]] +                                  // main effect: ACC
+      conf_entropy[s] .* entropy_t[starts[s]:ends[s]] +                        // main effect: entropy
+      conf_entropy_ACC[s] .* ACC[starts[s]:ends[s]] .* entropy_t[starts[s]:ends[s]];                 // 2-way interaction: ACC × entropy
+
     c0[s] ~ induced_dirichlet([1,10,1]', 0, 1, c0[s], c11[s]);
     c11[s] ~ induced_dirichlet([1,10,1]', 0, 2, c0[s], c11[s]);
 
@@ -306,6 +291,23 @@ model {
 
     u_mix[starts[s]:ends[s],] ~ gauss_copula_cholesky(rho_chol[s]);
   }
+
+  for (n in 1:N) {
+
+    rt_pred[n] =  rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n] + rt_stim[S_id[n]] * X[n];
+
+    u_mix[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] |rt_pred[n], rt_prec[S_id[n]]);
+
+    u_mix[n, 3] = ord_beta_reg_cdf(Conf[n] | conf_mu[n], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
+
+    target += ord_beta_reg_lpdf(Conf[n] | conf_mu[n], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
+
+    // target += binomial_lpmf(binom_y[n] | 1, theta[n]);
+  }
+  for(s in 1:S){
+    target += lognormal_lpdf(RT[starts[s]:ends[s]] - rt_ndt[s] | rt_pred[starts[s]:ends[s]], rt_prec[s]);
+  }
+
 }
 
 generated quantities {
@@ -317,38 +319,21 @@ generated quantities {
 
   matrix[P,P] correlation_matrix = L_u * L_u';
 
-  vector[N] log_lik_bin;
-  vector[N] log_lik_rt;
-  vector[N] log_lik_conf;
-  vector[N] log_lik;
+  vector[N] log_lik_bin = rep_vector(0,N);
+  vector[N] log_lik_rt = rep_vector(0,N);
+  vector[N] log_lik_conf = rep_vector(0,N);
+  vector[N] log_lik = rep_vector(0,N);
 
 
  matrix[N, 3] u_mixx;
- 
- // Pre-compute subject-level values that are reused
- vector[N] psycho_vals;
- vector[N] entropy_vals;
- vector[N] conf_mu_vals;
- vector[N] rt_pred_vals;
- 
- for (n in 1:N) {
-    int sid = S_id[n];
-    psycho_vals[n] = psycho(X[n], alpha[sid], beta_exp[sid], lapse[sid]);
-    entropy_vals[n] = entropy(psycho_vals[n]);
-    
-    real acc_ent = ACC[n] * entropy_vals[n];
-    conf_mu_vals[n] = conf_int[sid] + conf_ACC[sid] * ACC[n] + 
-                      conf_entropy[sid] * entropy_vals[n] + 
-                      conf_entropy_ACC[sid] * acc_ent;
-    rt_pred_vals[n] = rt_int[sid] + rt_slope[sid] * entropy_vals[n] + rt_stim[sid] * X[n];
-  }
-  
   for (n in 1:N) {
-    int sid = S_id[n];
-    
     u_mixx[n, 1] = u[n,1];
-    u_mixx[n, 2] = lognormal_cdf(RT[n] - rt_ndt[sid] | rt_pred_vals[n], rt_prec[sid]);
-    u_mixx[n, 3] = ord_beta_reg_cdf(Conf[n] | conf_mu_vals[n], conf_prec[sid], c0[sid], c11[sid]);
+
+    u_mixx[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]])) + rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
+
+    u_mixx[n, 3] = ord_beta_reg_cdf(Conf[n] |
+    conf_int[S_id[n]] + conf_ACC[S_id[n]] * ACC[n] + conf_entropy[S_id[n]] * entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]])) + conf_entropy_ACC[S_id[n]] * ACC[n] * entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]])),
+    conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
   }
 
   vector[N] log_lik_cop;
@@ -375,11 +360,12 @@ generated quantities {
   }
 
   for(n in 1:N){
-    int sid = S_id[n];
-    
-    log_lik_bin[n] = binomial_lpmf(binom_y[n] | 1, psycho_vals[n]);
-    log_lik_rt[n] = lognormal_lpdf(RT[n] - rt_ndt[sid] | rt_pred_vals[n], rt_prec[sid]);
-    log_lik_conf[n] = ord_beta_reg_lpdf(Conf[n] | conf_mu_vals[n], conf_prec[sid], c0[sid], c11[sid]);
+    log_lik_bin[n] = binomial_lpmf(binom_y[n] | 1, psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]));
+    log_lik_rt[n] = lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]))+ rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
+    log_lik_conf[n] = ord_beta_reg_lpdf(Conf[n] | conf_int[S_id[n]] +
+    conf_ACC[S_id[n]] * ACC[n] +
+    conf_entropy[S_id[n]] * entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]])) + conf_entropy_ACC[S_id[n]] * ACC[n] * entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]])),
+    conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
     log_lik[n] = log_lik_bin[n] + log_lik_rt[n] + log_lik_conf[n] + log_lik_cop[n];
   }
 
