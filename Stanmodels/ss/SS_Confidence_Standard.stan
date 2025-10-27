@@ -146,6 +146,21 @@ functions {
       return(0);
     }
   }
+
+  real get_conf(real ACC, real theta, real x, real alpha){
+  if(ACC == 1 && x > alpha){
+    return(theta);
+  }else if(ACC == 1 && x < alpha){
+    return(1-theta);
+  }else if(ACC == 0 && x > alpha){
+    return(1-theta);
+  }else if(ACC == 0 && x < alpha){
+    return(theta);
+  }else{
+    return(0);
+  }
+
+  }
 }
 
 
@@ -170,7 +185,7 @@ data {
 
 }
 transformed data{
-  int P = 12;
+  int P = 9;
 }
 
 parameters {
@@ -195,7 +210,7 @@ parameters {
 transformed parameters{
 
   real alpha = (gm[1]);
-  real beta = exp(gm[2]);
+  real beta = (gm[2]);
   real lapse = inv_logit(gm[3]) / 2;
 
   real rt_int = gm[4];
@@ -203,42 +218,39 @@ transformed parameters{
   real rt_prec = exp(gm[6]);
   real rt_stim = gm[7];
 
-
-  real conf_int = gm[8];
-  real conf_ACC = gm[9];
-  real conf_entropy = gm[10];
-  real conf_entropy_ACC = gm[11];
-  real conf_prec = exp(gm[12]);
+//
+//   real conf_int = gm[8];
+//   real conf_ACC = gm[9];
+//   real conf_entropy = gm[10];
+//   real conf_entropy_ACC = gm[11];
+  real conf_prec = exp(gm[8]);
+  real conf_noise = (gm[9]);
 
 
 
   vector[N] entropy_t;
-
   vector[N] conf_mu;
   vector[N] theta;
+  vector[N] theta_conf;
 
   profile("likelihood") {
   for (n in 1:N) {
-  theta[n] = psycho(X[n], alpha , beta , lapse );
+  theta[n] = psycho(X[n], alpha , exp(beta) , lapse );
+  theta_conf[n] = psycho(X[n], alpha , exp(beta + conf_noise) , lapse );
 
-  entropy_t[n] = entropy(psycho(X[n], alpha , beta , lapse ));
+  entropy_t[n] = entropy(psycho(X[n], alpha , exp(beta) , lapse ));
 
-  conf_mu[n] = conf_int  +                                           // intercept
-    conf_ACC  * ACC[n] +                                  // main effect: ACC
-    conf_entropy  * entropy_t[n] +                        // main effect: entropy
-
-    conf_entropy_ACC  * ACC[n] * entropy_t[n];                 // 2-way interaction: ACC × entropy
-  }
-
-  }
+  conf_mu[n] = get_conf(ACC[n],theta_conf[n],X[n], alpha);
 }
-
+}
+}
 model {
 
   gm[1] ~ normal(0,10); //global mean of beta
   gm[2] ~ normal(-2,3); //global mean of beta
   gm[3] ~ normal(-4,2); //global mean of beta
-  gm[4:12] ~ normal(0,5); //global mean of beta
+  gm[4:8] ~ normal(0,5); //global mean of beta
+  gm[9] ~ normal(0,5); //global mean of beta
 
   rt_ndt ~ normal(0.3,0.05);
 
@@ -250,11 +262,11 @@ model {
 
     u_mix[n, 2] = lognormal_cdf(RT[n] - rt_ndt  | rt_int  + rt_slope  * entropy_t[n] + rt_stim  * X[n], rt_prec );
 
-    u_mix[n, 3] = ord_beta_reg_cdf(Conf[n] | conf_mu[n], conf_prec , c0 , c11 );
+    u_mix[n, 3] = ord_beta_reg_cdf(Conf[n] | logit(conf_mu[n]), conf_prec , c0 , c11 );
 
     target += lognormal_lpdf(RT[n] - rt_ndt  | rt_int  + rt_slope  * entropy_t[n]+ rt_stim  * X[n], rt_prec );
 
-    target += ord_beta_reg_lpdf(Conf[n] | conf_mu[n], conf_prec , c0 , c11 );
+    target += ord_beta_reg_lpdf(Conf[n] | logit(conf_mu[n]), conf_prec , c0 , c11 );
 
     // target += binomial_lpmf(binom_y[n] | 1, theta[n]);
 
@@ -290,7 +302,7 @@ generated quantities {
 
     u_mixx[n, 2] = lognormal_cdf(RT[n] - rt_ndt  | rt_int  + rt_slope  * entropy_t[n] + rt_stim  * X[n], rt_prec );
 
-    u_mixx[n, 3] = ord_beta_reg_cdf(Conf[n] | conf_mu[n], conf_prec , c0 , c11 );
+    u_mixx[n, 3] = ord_beta_reg_cdf(Conf[n] | logit(conf_mu[n]), conf_prec , c0 , c11 );
   }
 
   vector[N] log_lik_cop =  gauss_copula_cholesky_per_row(u_mixx[starts:ends, ], rho_chol);
@@ -305,7 +317,7 @@ generated quantities {
   for(n in 1:N){
     log_lik_bin[n] = binomial_lpmf(binom_y[n] | 1, theta[n]);
     log_lik_rt[n] = lognormal_lpdf(RT[n] - rt_ndt  | rt_int  + rt_slope  * entropy_t[n]+ rt_stim  * X[n], rt_prec );
-    log_lik_conf[n] = ord_beta_reg_lpdf(Conf[n] | conf_mu[n], conf_prec , c0 , c11 );
+    log_lik_conf[n] = ord_beta_reg_lpdf(Conf[n] | logit(conf_mu[n]), conf_prec , c0 , c11 );
     log_lik[n] = log_lik_bin[n] + log_lik_rt[n] + log_lik_conf[n] + log_lik_cop[n];
   }
 

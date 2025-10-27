@@ -284,13 +284,15 @@ model {
       conf_entropy[s] .* entropy_t[starts[s]:ends[s]] +                        // main effect: entropy
       conf_entropy_ACC[s] .* ACC[starts[s]:ends[s]] .* entropy_t[starts[s]:ends[s]];                 // 2-way interaction: ACC × entropy
 
+
+    rt_pred[starts[s]:ends[s]] =  rt_int[s] + rt_slope[s] .* entropy_t[starts[s]:ends[s]]+ rt_stim[s] .* X[starts[s]:ends[s]];
+
+
+
   }
 
   for (n in 1:N) {
-
-    rt_pred[n] =  rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n] + rt_stim[S_id[n]] * X[n];
-
-    u_mix[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] |rt_pred[n], rt_prec[S_id[n]]);
+    u_mix[n, 2] = lognormal_lcdf(RT[n] - rt_ndt[S_id[n]] |rt_pred[n], rt_prec[S_id[n]]);
 
     u_mix[n, 3] = ord_beta_reg_cdf(Conf[n] | conf_mu[n], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
 
@@ -298,6 +300,8 @@ model {
 
     // target += binomial_lpmf(binom_y[n] | 1, theta[n]);
   }
+
+
   for(s in 1:S){
     target += lognormal_lpdf(RT[starts[s]:ends[s]] - rt_ndt[s] | rt_pred[starts[s]:ends[s]], rt_prec[s]);
     c0[s] ~ induced_dirichlet([1,10,1]', 0, 1, c0[s], c11[s]);
