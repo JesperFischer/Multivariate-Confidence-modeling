@@ -1,0 +1,787 @@
+---
+title: "Untitled"
+author: "jesper fischer ehmsen"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(tidyverse,posterior,tidybayes,cmdstanr, furrr,futuremap,ordbetareg, future.apply, patchwork,purrr)
+
+
+invisible(
+  lapply(
+    list.files(here::here("Analysis", "Functions"), pattern = "\\.[Rr]$", full.names = TRUE),
+    source
+  )
+)
+
+```
+
+## Alder
+
+
+```{r}
+df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Adler_2018_Expt1.csv"))
+
+df %>%
+  mutate(Difficulty = ifelse(Stimulus == 2, 13 - Difficulty, Difficulty),
+         ACC = ifelse(Stimulus == Response,1,0),
+         Response = Response-1,
+         Confidence = Confidence/max(Confidence)) %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_decConf))%>% group_by(Difficulty,Stimulus,name,Task) %>% 
+  summarize(mean = mean(value),
+            se = sd(value)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty, col = as.factor(Stimulus)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_grid(Task~name, scales = "free")+theme_minimal()
+  
+
+df %>%
+  mutate(Difficulty = ifelse(Stimulus == 2, 13 - Difficulty, Difficulty),
+         ACC = ifelse(Stimulus == Response,1,0),
+         Response = Response-1,
+         Confidence = Confidence/max(Confidence)) %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_decConf))%>% group_by(Difficulty,name,Task,ACC) %>% 
+  summarize(mean = mean(value),
+            se = sd(value)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty, col = as.factor(ACC)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_grid(Task~name, scales = "free")+theme_minimal()
+
+```
+
+
+```{r, fig.height=6, fig.width=10}
+df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Adler_2018_Expt2.csv"))
+
+dfq = df %>%
+  mutate(Difficulty = ifelse(Stimulus == 2, 13 - Difficulty, Difficulty),
+         Correct = Stimulus == Response,
+         Response = Response-1,
+         ConfidenceRT = RT_conf) %>% 
+   rename(
+    Confidence = Confidence,
+    X  = Orientation,
+    Y = Response,
+    RT = RT_dec,
+    subject = Subj_idx
+  ) 
+
+remover(dfq %>% filter(Task == "A"))
+remover(dfq %>% filter(Task == "B")%>% mutate(X = abs(X)))
+```
+
+```{r, fig.height=7,fig.width=10}
+(Group_plot(dfq %>% filter(Task == "A"), bin = 5)+ggtitle("CohortA") | 
+   Group_plot(dfq %>% filter(Task == "B") %>% mutate(X = abs(X)), bin = 5)+ggtitle("CohortB"))+
+  plot_layout(guides = "collect")&theme(legend.position = "top")
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(dfq %>% filter(Task == "A") %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 10))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(dfq %>% filter(Task == "A"), chunk, bin = 7))
+plots
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(dfq %>% filter(Task == "B") %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 10))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(dfq %>% filter(Task == "B") %>% mutate(X = abs(X)), chunk, bin = 7))
+plots
+```
+
+
+# fit model
+
+```{r}
+
+models <- c("pure", "meta_un", "meta_un_rt_un")
+names(models) <- c("data_Adler_2018_pure", "data_Adler_2018_metaun", "data_Adler_2018_metaun_rtun")
+
+# Set up the plan for parallel processing
+plan(multisession, workers = 4)  # Use multisession for parallel processing
+
+# Fit the models in parallel
+fits <- future_map(names(models), ~ {
+  fit_data_copula_rt(
+    dfq%>% filter(Task == "A"),
+    ACC = FALSE,
+    .x,  # This will take the name of the model
+    modeltype = models[[.x]],  # Get the corresponding model type
+    conf = "discrete_conf"
+  )
+})
+
+# Assign the results to named variables
+names(fits) <- names(models)
+
+fit0 = fit_data_copula_rt(dfq %>% filter(Task == "A"), ACC = F, "VMP1_pure",modeltype = "pure",conf = "discrete_conf")
+fit1 = fit_data_copula_rt(dfq %>% filter(Task == "A"),  ACC = F, "VMP1_metaun",modeltype = "meta_un",conf = "discrete_conf")
+fit2 = fit_data_copula_rt(dfq %>% filter(Task == "A"),  ACC = F, "VMP1_metaun_rtun",modeltype = "meta_un_rt_un",conf = "discrete_conf")
+
+
+#fit1 = fit_data_copula_rt(df %>% filter(cohort == "vmp2"),ACC = F, "VMP2")
+```
+
+```{r, fig.height=6, fig.width=10}
+
+df %>% 
+  mutate(Difficulty = ifelse(Stimulus == 2, 13 - Difficulty, Difficulty),
+         Response = Response-1,
+         Confidence = Confidence/max(Confidence)) %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_dec))%>% group_by(Difficulty,Stimulus,name,Task) %>% 
+  summarize(mean = mean(value),
+            se = sd(value)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty, col = as.factor(name)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_grid(name~Task, scales = "free")+
+  theme_minimal()+
+  theme(legend.position = "top",
+  text = element_text(size = 16),        # General text size
+  axis.title = element_text(size = 18), # Axis titles
+  axis.text = element_text(size = 14),  # Axis tick labels
+  plot.title = element_text(size = 20)  # Plot title)
+)
+
+
+df %>% 
+  mutate(Difficulty = ifelse(Stimulus == 2, 13 - Difficulty, Difficulty),
+         Response = Response-1,
+         Confidence = Confidence/max(Confidence)) %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_dec,RT_conf ))%>% group_by(Difficulty,name,Task) %>% 
+  summarize(mean = mean(value),
+            se = sd(value)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty, col = as.factor(Task)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_grid(~name, scales = "free")+theme_minimal()
+
+
+
+
+
+df %>%
+  mutate(Difficulty = ifelse(Stimulus == 2, 13 - Difficulty, Difficulty),
+         ACC = ifelse(Stimulus == Response,1,0),
+         Response = Response-1,
+         Confidence = Confidence/max(Confidence)) %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_dec,RT_conf))%>% group_by(Difficulty,name,Task,ACC) %>% 
+  summarize(mean = mean(value),
+            se = sd(value)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty, col = as.factor(ACC)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_grid(Task~name, scales = "free")+theme_minimal()
+  
+
+```
+
+```{r}
+df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Adler_2018_Expt3.csv"))
+
+df %>% 
+  mutate(Difficulty = ifelse(Stimulus == 2, 13 - Difficulty, Difficulty),
+         Response = Response-1,
+         Confidence = Confidence/max(Confidence)) %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_decConf))%>% group_by(Difficulty,Stimulus,name) %>% 
+  summarize(mean = mean(value),
+            se = sd(value)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty, col = as.factor(Stimulus)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_grid(~name, scales = "free")+theme_minimal()
+
+
+
+
+df %>%
+  mutate(Difficulty = ifelse(Stimulus == 2, 13 - Difficulty, Difficulty),
+         ACC = ifelse(Stimulus == Response,1,0),
+         Response = Response-1,
+         Confidence = Confidence/max(Confidence)) %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_decConf))%>% group_by(Difficulty,name,ACC) %>% 
+  summarize(mean = mean(value),
+            se = sd(value)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty, col = as.factor(ACC)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_grid(~name, scales = "free")+theme_minimal()
+  
+```
+
+
+
+
+
+# Arbuzova
+
+
+```{r, fig.height=10,fig.width=10}
+df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Arbuzova_2021_expt1.csv"))
+
+
+df %>% mutate(Confidence = as.numeric(ifelse(is.nan(Confidence), NA,Confidence)),
+              Stimulus = as.numeric(ifelse(is.nan(Stimulus), NA,Stimulus)),
+              Response = as.numeric(ifelse(is.nan(Response), NA,Response)),
+              RT_dec = as.numeric(ifelse(is.nan(RT_dec), NA,RT_dec)),
+              Difference = as.numeric(ifelse(is.nan(Difference), NA,Difference)),
+              Condition = as.numeric(ifelse(is.nan(Condition), NA,Condition))
+              ) %>%
+  group_by(Condition) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difference = ifelse(Stimulus == 2,Difference, -Difference),
+                Response = Response-1,
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_conf,RT_dec))%>% 
+  group_by(Difference,Stimulus,name,Condition) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difference, col = as.factor(Stimulus)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(Condition~name, scales = "free", labeller = label_both)+theme_minimal()+theme(legend.position = "top")
+  
+
+df %>% mutate(Confidence = as.numeric(ifelse(is.nan(Confidence), NA,Confidence)),
+              Stimulus = as.numeric(ifelse(is.nan(Stimulus), NA,Stimulus)),
+              Response = as.numeric(ifelse(is.nan(Response), NA,Response)),
+              RT_dec = as.numeric(ifelse(is.nan(RT_dec), NA,RT_dec)),
+              Difference = as.numeric(ifelse(is.nan(Difference), NA,Difference)),
+              Condition = as.numeric(ifelse(is.nan(Condition), NA,Condition))
+              ) %>%
+  group_by(Condition) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difference = ifelse(Stimulus == 2, Difference, -Difference),
+                Response = Response-1,
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_conf,RT_dec))%>% 
+  group_by(Difference,ACC,name,Condition) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difference, col = as.factor(ACC)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(Condition~name, scales = "free")+theme_minimal()+theme(legend.position = "top")
+  
+  
+```
+
+# Exp 2 task 1
+```{r, fig.height=10,fig.width=10}
+df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Arbuzova_2021_expt2.csv"))
+
+
+df %>% filter(Task == 1) %>% mutate(Confidence = as.numeric(ifelse(is.nan(Confidence), NA,Confidence)),
+              Stimulus = as.numeric(ifelse(is.nan(Stimulus), NA,Stimulus)),
+              Response = as.numeric(ifelse(is.nan(Response), NA,Response)),
+              RT_dec = as.numeric(ifelse(is.nan(RT_dec), NA,RT_dec)),
+              Difference = as.numeric(ifelse(is.nan(Difference), NA,Difference)),
+              Condition = as.numeric(ifelse(is.nan(Condition), NA,Condition))
+              ) %>%
+  group_by(Condition) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difference = ifelse(Stimulus == 2, - Difference, Difference),
+                Response = Response-1,
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_conf,RT_dec))%>% 
+  group_by(Difference,Stimulus,name,Condition) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difference, col = as.factor(Stimulus)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(Condition~name, scales = "free")+theme_minimal()+theme(legend.position = "top")
+  
+
+df %>% filter(Task == 1) %>% mutate(Confidence = as.numeric(ifelse(is.nan(Confidence), NA,Confidence)),
+              Stimulus = as.numeric(ifelse(is.nan(Stimulus), NA,Stimulus)),
+              Response = as.numeric(ifelse(is.nan(Response), NA,Response)),
+              RT_dec = as.numeric(ifelse(is.nan(RT_dec), NA,RT_dec)),
+              Difference = as.numeric(ifelse(is.nan(Difference), NA,Difference)),
+              Condition = as.numeric(ifelse(is.nan(Condition), NA,Condition))
+              ) %>%
+  group_by(Condition) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difference = ifelse(Stimulus == 2, - Difference, Difference),
+                Response = Response-1,
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_conf,RT_dec))%>% 
+  group_by(Difference,ACC,name,Condition) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difference, col = as.factor(ACC)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(Condition~name, scales = "free")+theme_minimal()+theme(legend.position = "top")
+  
+  
+```
+
+
+# Exp 2 task 2
+```{r, fig.height=10,fig.width=10}
+df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Arbuzova_2021_expt2.csv"))
+
+
+df %>% filter(Task == 2) %>% mutate(Confidence = as.numeric(ifelse(is.nan(Confidence), NA,Confidence)),
+              Stimulus = as.numeric(ifelse(is.nan(Stimulus), NA,Stimulus)),
+              Response = as.numeric(ifelse(is.nan(Response), NA,Response)),
+              RT_dec = as.numeric(ifelse(is.nan(RT_dec), NA,RT_dec)),
+              Difference = as.numeric(ifelse(is.nan(Difference), NA,Difference)),
+              Condition = as.numeric(ifelse(is.nan(Condition), NA,Condition))
+              ) %>%
+  group_by(Condition) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difference = ifelse(Stimulus == 2, - Difference, Difference),
+                Response = Response-1,
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_conf,RT_dec))%>% 
+  group_by(Difference,Stimulus,name,Condition) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difference, col = as.factor(Stimulus)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(Condition~name, scales = "free")+theme_minimal()+theme(legend.position = "top")
+  
+
+df %>% filter(Task == 2) %>% mutate(Confidence = as.numeric(ifelse(is.nan(Confidence), NA,Confidence)),
+              Stimulus = as.numeric(ifelse(is.nan(Stimulus), NA,Stimulus)),
+              Response = as.numeric(ifelse(is.nan(Response), NA,Response)),
+              RT_dec = as.numeric(ifelse(is.nan(RT_dec), NA,RT_dec)),
+              Difference = as.numeric(ifelse(is.nan(Difference), NA,Difference)),
+              Condition = as.numeric(ifelse(is.nan(Condition), NA,Condition))
+              ) %>%
+  group_by(Condition) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difference = ifelse(Stimulus == 2, - Difference, Difference),
+                Response = Response-1,
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_conf,RT_dec))%>% 
+  group_by(Difference,ACC,name,Condition) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difference, col = as.factor(ACC)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(Condition~name, scales = "free")+theme_minimal()+theme(legend.position = "top")
+  
+  
+```
+
+
+
+
+
+# Exp 3
+```{r, fig.height=10,fig.width=10}
+df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Arbuzova_unpub_3.csv"))
+
+
+df %>% mutate(Confidence = as.numeric(ifelse(is.nan(Confidence), NA,Confidence)),
+              Stimulus = as.numeric(ifelse(is.nan(Stimulus), NA,Stimulus)),
+              Response = as.numeric(ifelse(is.nan(Response), NA,Response)),
+              RT_dec = as.numeric(ifelse(is.nan(RT_dec), NA,RT_dec)),
+              Difficulty  = as.numeric(ifelse(is.nan(Difficulty ), NA,Difficulty ))
+              ) %>%
+  group_by(Task) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 2, - Difficulty , Difficulty ),
+                Response = Response-1,
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_conf,RT_dec))%>% 
+  group_by(Difficulty ,Stimulus,name,Task) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty , col = as.factor(Stimulus)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(Task~name, scales = "free")+theme_minimal()+theme(legend.position = "top")
+  
+
+df %>% mutate(Confidence = as.numeric(ifelse(is.nan(Confidence), NA,Confidence)),
+              Stimulus = as.numeric(ifelse(is.nan(Stimulus), NA,Stimulus)),
+              Response = as.numeric(ifelse(is.nan(Response), NA,Response)),
+              RT_dec = as.numeric(ifelse(is.nan(RT_dec), NA,RT_dec)),
+              Difficulty  = as.numeric(ifelse(is.nan(Difficulty ), NA,Difficulty ))
+              ) %>%
+  group_by(Task) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 2, - Difficulty , Difficulty ),
+                Response = Response-1,
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_conf,RT_dec))%>% 
+  group_by(Difficulty ,ACC,name,Task) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty , col = as.factor(ACC)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(Task~name, scales = "free")+theme_minimal()+theme(legend.position = "top")
+  
+  
+```
+
+
+```{r, fig.height=8,fig.width=10}
+df <- read_csv(here::here("Data","Confidence Database","Confidence Database","data_Bang_2019_Exp1.csv"))
+
+
+
+df %>%
+  group_by(Condition) %>% filter(SN != max(SN) & SN != min(SN)) %>%
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 2, SN , -SN),
+                Response = Response-1,
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  
+  # filter(Difficulty != min(Difficulty)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_dec))%>% 
+  mutate(Difficulty_bin = cut(Difficulty, breaks = 20, labels = FALSE)) %>% 
+  group_by(Difficulty_bin ,Stimulus,name,Condition) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty_bin , col = as.factor(name)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(name~Condition, scales = "free")+theme_minimal()+
+  theme(legend.position = "top",
+  text = element_text(size = 16),        # General text size
+  axis.title = element_text(size = 18), # Axis titles
+  axis.text = element_text(size = 14),  # Axis tick labels
+  plot.title = element_text(size = 20)  # Plot title)
+)
+
+
+
+
+df %>%
+  group_by(Condition) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 2, SN , -SN),
+                Response = Response-1,
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_conf,RT_dec))%>% 
+  mutate(Difficulty_bin = cut(Difficulty, breaks = 20, labels = FALSE)) %>% 
+  group_by(Difficulty_bin ,name,Condition,ACC) %>%  
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty_bin , col = as.factor(ACC)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(Condition~name, scales = "free")+theme_minimal()+theme(legend.position = "top")
+```
+
+
+
+```{r, fig.height=6, fig.width=10}
+df <- read_csv(here::here("Data","Confidence Database","Confidence Database","data_Bang_2019_Exp1.csv"))
+
+df = df %>% 
+  group_by(Condition) %>% filter(SN != max(SN) & SN != min(SN)) %>%
+         mutate(Correct = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 2, SN , -SN),
+                Response = Response-1,
+                ConfidenceRT = RT_conf) %>% 
+   rename(
+    Confidence = Confidence,
+    X  = Difficulty,
+    Y = Response,
+    RT = RT_dec,
+    subject = Subj_idx
+  ) 
+
+bin = 10
+bind_rows(
+      df %>% filter(Condition == 1) %>% 
+        mutate(X_bin = cut(X, bin)) %>%
+        group_by(X_bin, Day) %>%
+        summarize(name = "Type-1",
+                  mean = mean(Y),
+                  se = mean(Y)*(1-mean(Y)) / sqrt(n())),
+
+      df %>% filter(Condition == 1) %>% 
+        mutate(X_bin = cut(X, bin)) %>%
+        group_by(X_bin, Day) %>%
+        summarize(name = "RT",
+                  mean = mean(RT),
+                  se = sd(RT) / sqrt(n())),
+
+      df %>% filter(Condition == 1) %>% 
+        mutate(X_bin = cut(X, bin)) %>%
+        group_by(X_bin, Day,Correct) %>%
+        summarize(name = "Confidence",
+                  mean = mean(Confidence),
+                  se = sd(Confidence) / sqrt(n()))
+    ) %>% 
+    filter(name == "Type-1") %>%
+    # filter(name == "RT") %>% 
+      # filter(name == "Confidence") %>% 
+      ggplot(aes(x = X_bin, y = mean, ymin = mean - 2*se, ymax = mean + 2*se)) +
+      geom_line(aes(group = Day, color = interaction(as.factor(Day))))+
+      geom_pointrange(aes(group = Day, color = interaction(as.factor(Day))), position = position_dodge(width = 0.5)) +   # only affects responseConf
+      # facet_wrap(Day~name, scales = "free") +
+      facet_wrap(~Correct, scales = "free") +
+      theme_classic(base_size = 16) +
+      geom_hline(yintercept = 0.5, linetype = 2)+
+      labs(color = "Correct")+
+      geom_vline(xintercept = 0, linetype = 2)+
+      theme(legend.position = "top")
+```
+
+
+```{r, fig.height=6, fig.width=10}
+remover(dfq %>% filter(Condition == 1))
+remover(dfq %>% filter(Condition == 2))
+remover(dfq %>% filter(Condition == 3))
+
+```
+
+```{r, fig.height=7,fig.width=10}
+(Group_plot(dfq %>% filter(Condition == 1), bin = 5)+ggtitle("Cohort1") | 
+   Group_plot(dfq %>% filter(Condition == 2), bin = 5)+ggtitle("Cohort2")| 
+   Group_plot(dfq %>% filter(Condition == 3), bin = 5)+ggtitle("Cohort3"))+
+  plot_layout(guides = "collect")&theme(legend.position = "top")
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(dfq %>% filter(Condition == 1) %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 6))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(dfq %>% filter(Condition == 1), chunk, bin = 7))
+plots
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(dfq %>% filter(Condition == 2) %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 6))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(dfq %>% filter(Condition == 2), chunk, bin = 7))
+plots
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(dfq %>% filter(Condition == 3) %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 6))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(dfq %>% filter(Condition == 3), chunk, bin = 7))
+plots
+```
+
+# fit model
+
+```{r}
+
+models <- c("pure", "meta_un", "meta_un_rt_un")
+names(models) <- c("data_Bang_2019_Exp1_day1_pure", "data_Bang_2019_Exp1_day1_metaun", "data_Bang_2019_Exp1_day1_metaun_rtun")
+
+# Set up the plan for parallel processing
+plan(multisession, workers = 4)  # Use multisession for parallel processing
+
+# Fit the models in parallel
+fits <- future_map(names(models), ~ {
+  fit_data_copula_rt(
+    dfq%>% filter(Condition == 1 & Day == 1),
+    ACC = FALSE,
+    .x,  # This will take the name of the model
+    modeltype = models[[.x]],  # Get the corresponding model type
+    conf = "discrete_conf"
+  )
+})
+# Assign the results to named variables
+names(fits) <- (models)
+
+# Fit the models in parallel
+fits <- future_map(names(models), ~ {
+  fit_data_copula_rt(
+    dfq%>% filter(Condition == 2),
+    ACC = FALSE,
+    .x,  # This will take the name of the model
+    modeltype = models[[.x]],  # Get the corresponding model type
+    conf = "discrete_conf"
+  )
+})
+# Assign the results to named variables
+names(fits) <- paste0("hallo",models)
+
+
+# Fit the models in parallel
+fits <- future_map(names(models), ~ {
+  fit_data_copula_rt(
+    dfq%>% filter(Condition == 3),
+    ACC = FALSE,
+    .x,  # This will take the name of the model
+    modeltype = models[[.x]],  # Get the corresponding model type
+    conf = "discrete_conf"
+  )
+})
+# Assign the results to named variables
+names(fits) <- paste0("tester",models)
+
+
+
+fit0 = fit_data_copula_rt(dfq %>% filter(Condition == 1 & Day == 1), ACC = F, "VMP1_pure",modeltype = "pure",conf = "discrete_conf")
+fit1 = fit_data_copula_rt(dfq %>% filter(Condition == 1 & Day == 1),  ACC = F, "VMP1_metaun",modeltype = "meta_un",conf = "discrete_conf")
+fit2 = fit_data_copula_rt(dfq %>% filter(Condition == 1 & Day == 1),  ACC = F, "VMP1_metaun_rtun",modeltype = "meta_un_rt_un",conf = "discrete_conf")
+
+
+#fit1 = fit_data_copula_rt(df %>% filter(cohort == "vmp2"),ACC = F, "VMP2")
+```
+
+
+
+
+# perhaps good dataset to look at confidence ratings models
+```{r, fig.height=7,fig.width=10}
+df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Clark_2018.csv"))
+
+
+df %>%
+  group_by(Task) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 1, `Stimulus Peak Velocity (deg/s)`, -`Stimulus Peak Velocity (deg/s)`),
+                Response = ifelse(Response == -1,0,1),
+                Stimulus = ifelse(Stimulus == -1,0,1),
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence))%>% 
+  mutate(Difficulty_bin = cut(Difficulty, breaks = 20, labels = FALSE)) %>% 
+  group_by(Difficulty_bin ,Stimulus,name,Task) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty_bin , col = as.factor(Stimulus)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(name~Task, scales = "free", ncol = 3)+theme_minimal()+theme(legend.position = "top")
+  
+
+df %>%
+  group_by(Task) %>% 
+         mutate(Difficulty  = ifelse(Stimulus == 1, `Stimulus Peak Velocity (deg/s)`, -`Stimulus Peak Velocity (deg/s)`),
+                Response = ifelse(Response == -1,0,1),
+                Stimulus = ifelse(Stimulus == -1,0,1),
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence))%>% 
+  mutate(Difficulty_bin = cut(Difficulty, breaks = 20, labels = FALSE)) %>% 
+  group_by(Difficulty_bin,name,Task,Accuracy ) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty_bin , col = as.factor(Accuracy )))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(name~Task, scales = "free", ncol = 3)+theme_minimal()+theme(legend.position = "top")
+
+
+unique(df$Task)
+
+df %>%filter(Task == "2-stage binary/uncertainty") %>% 
+  group_by(Task) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 1, `Stimulus Peak Velocity (deg/s)`, -`Stimulus Peak Velocity (deg/s)`),
+                Response = ifelse(Response == -1,0,1),
+                Stimulus = ifelse(Stimulus == -1,0,1),
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence))%>% 
+  mutate(Difficulty_bin = cut(Difficulty, breaks = 20, labels = FALSE)) %>% 
+  mutate(Difficulty_bin = Difficulty_bin - 10.5) %>% 
+  group_by(Difficulty_bin ,Stimulus,name,Task,Subj_idx) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty_bin , col = as.factor(Stimulus)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_grid(name~Subj_idx, scales = "free")+theme_minimal()+theme(legend.position = "top")
+
+
+
+df %>%filter(Task == "2-stage trinary/binary") %>% 
+  group_by(Task) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 1, `Stimulus Peak Velocity (deg/s)`, -`Stimulus Peak Velocity (deg/s)`),
+                Response = ifelse(Response == -1,0,1),
+                Stimulus = ifelse(Stimulus == -1,0,1),
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence))%>% 
+  mutate(Difficulty_bin = cut(Difficulty, breaks = 20, labels = FALSE)) %>% 
+  mutate(Difficulty_bin = Difficulty_bin - 10.5) %>% 
+  group_by(Difficulty_bin ,Stimulus,name,Task,Subj_idx) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty_bin , col = as.factor(Stimulus)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_grid(name~Subj_idx, scales = "free")+theme_minimal()+theme(legend.position = "top")
+
+
+df %>%filter(Task == "1-stage binary/uncertainty") %>% 
+  group_by(Task) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 1, `Stimulus Peak Velocity (deg/s)`, -`Stimulus Peak Velocity (deg/s)`),
+                Response = ifelse(Response == -1,0,1),
+                Stimulus = ifelse(Stimulus == -1,0,1),
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence))%>% 
+  mutate(Difficulty_bin = cut(Difficulty, breaks = 20, labels = FALSE)) %>% 
+  mutate(Difficulty_bin = Difficulty_bin - 10.5) %>% 
+  group_by(Difficulty_bin ,Stimulus,name,Task,Subj_idx) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty_bin , col = as.factor(Stimulus)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_grid(name~Subj_idx, scales = "free")+theme_minimal()+theme(legend.position = "top")
+
+
+```
+
+# looks decent!
+```{r, fig.height=8,fig.width=10}
+df <- read_csv(here::here("Data","Confidence Database","Confidence Database","data_Desender_2021_Cognit.csv"))
+
+
+df %>%
+  filter(Training == 0) %>% 
+  group_by(Condition, Volatility) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 1,Coherence, -Coherence),
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_dec,RT_decConf))%>% 
+  group_by(Difficulty ,Volatility,name,Condition) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% drop_na() %>% 
+  ggplot(aes(x = Difficulty , col = as.factor(Volatility)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(name~Condition, scales = "free", labeller = label_both)+theme_minimal()+
+  theme(legend.position = "top",
+  text = element_text(size = 16),        # General text size
+  axis.title = element_text(size = 18), # Axis titles
+  axis.text = element_text(size = 14),  # Axis tick labels
+  plot.title = element_text(size = 20)  # Plot title)
+)
+
+  
+
+
+df %>% 
+  filter(Training == 0) %>% 
+  group_by(Condition, Volatility) %>% 
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 1,Coherence, -Coherence),
+                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_dec,RT_decConf))%>% 
+  group_by(Difficulty ,Volatility,name,Condition, ACC) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% drop_na() %>% 
+  ggplot(aes(x = Difficulty , col = as.factor(ACC), shape = as.factor(Volatility)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(Condition~name, scales = "free")+theme_minimal()+theme(legend.position = "top")
+  
+
+```
+

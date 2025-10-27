@@ -124,6 +124,19 @@ fit2 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers
 #fit1 = fit_data_copula_rt(df %>% filter(cohort == "vmp2"),ACC = F, "VMP2")
 ```
 
+```{r}
+plot_diagnostics(pure)
+```
+
+```{r}
+plot_diagnostics(med)
+```
+
+
+```{r}
+plot_diagnostics(full)
+```
+
 
 ```{r}
 pred_pure = Get_predictive(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 10, model = "pure")
@@ -187,14 +200,101 @@ conf_full[[2]]+ggtitle("full")
 
 
 ```{r}
-pred_pure = Get_predictive_group(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "pure")
+pred_pure_group = Get_predictive_group(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "pure")
+pred_pure_group_new_sub = Get_predictive_new_subject(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "pure")
+# pred_pure_group_resp = Get_predictive_group_responses(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "pure")
+# pred_pure_group_subject = Get_predictive_subject_average(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "pure")
+# pred_pure_group_subject_resp = Get_predictive_subject_average_responses(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "pure")
 
-pred_full = Get_predictive_group(full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "full")
+
+
+pred_full_group = Get_predictive_group(full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "full")
+pred_full_group_new_sub = Get_predictive_new_subject(full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "full")
+```
+
+```{r, fig.width= 12, fig.height=7, message=FALSE,warning=FALSE}
+
+group_predictive(pred_pure_group,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
+  labs(
+    title = expression(paste("(PURE) Population mean predictions: E[Y | X, ", mu[theta], "], Uncertainty = Var(",mu[theta],")")),
+    subtitle = "Expected response for the population",
+    caption = "Model predictions for the expected population mean response. 
+    Lines ([95 , 90 , 80]% CI) show the posterior mean of the expected value,
+    reflecting uncertainty in the group-level parameters."
+  )
+
+
+group_predictive(pred_full_group,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
+  labs(
+    title = expression(paste("(FULL) Population mean predictions: E[Y | X, ", mu[theta], "], Uncertainty = Var(",mu[theta],")")),
+    subtitle = "Expected response for the population",
+    caption = "Model predictions for the expected population mean response. 
+    Lines ([95 , 90 , 80]% CI) show the posterior mean of the expected value,
+    reflecting uncertainty in the group-level parameters."
+  )
+
 ```
 
 
+```{r}
+group_predictive(pred_full_group_new_sub,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
+  labs(
+    title = expression(paste(
+      "(FULL) New subject predictions: ", 
+      "E[Y | X, ", theta[s], "] where ", 
+      theta[s], " ~ MVN(", mu[theta], ", ", Sigma, ")"
+    )),
+    subtitle = "Expected response for hypothetical subjects from the population",
+    caption = "Credibility intervals reflect two sources of uncertainty:
+(1) Parameter uncertainty: Var(μ_θ, Σ), from posterior draws
+(2) Population heterogeneity: Var(θ_s | μ_θ, Σ) - from sampling new subjects."
+  )
+
+
+group_predictive(pred_pure_group_new_sub,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
+  labs(
+    title = expression(paste(
+      "(PURE) New subject predictions: ", 
+      "E[Y | X, ", theta[s], "] where ", 
+      theta[s], " ~ MVN(", mu[theta], ", ", Sigma, ")"
+    )),
+    subtitle = "Expected response for hypothetical subjects from the population",
+    caption = "Credibility intervals reflect two sources of uncertainty:
+(1) Parameter uncertainty: Var(μ_θ, Σ), from posterior draws
+(2) Population heterogeneity: Var(θ_s | μ_θ, Σ) - from sampling new subjects."
+  )
+```
+
+
+
+# extra type of plotting
 ```{r, fig.width= 12, fig.height=7, message=FALSE,warning=FALSE}
-group_predictive(pred_pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))
+group_predictive(pred_pure_group_resp,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
+  labs(
+    title = expression(paste("Population response predictions: Y ~ f(X, ", mu[theta], ")")),
+    caption = "Model predictions for the expected population responses. 
+     Lines ([95 , 90 , 80]% CI) show the posterior mean of the expected value of the responses
+    Uncertainty reflects the group-level parameters & responses varability."
+  )
+
+
+group_predictive(pred_pure_group_subject,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
+  labs(
+    title = expression(paste("Between-subject variability: E[Y | X, ", bar(theta)[s], "]")),
+    caption = "Predicted response distributions for a hypothetical individual with average population parameters.
+    These intervals reflect the range of responses we would expect to observe from a single typical individual."
+  )
+
+
+group_predictive(pred_pure_group_subject_resp,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
+  labs(
+    title = expression(paste("Individual response variability: ", Y[s], " ~ f(X, ", bar(theta)[s], ")")),
+    caption = "Predicted response distributions for a hypothetical individual with average population parameters. Shaded regions show 95% prediction intervals accounting for both parameter uncertainty and within-individual response variability. These intervals reflect the range of responses we would expect to observe from a single typical individual."
+  )
+
+
+
+
 
 group_predictive(pred_full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))
 

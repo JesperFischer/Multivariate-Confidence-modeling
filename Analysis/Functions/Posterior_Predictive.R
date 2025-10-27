@@ -5,7 +5,7 @@ Get_predictive = function(fit,df,n_draws, model){
   if(model == "pure"){
     df$subject = as.numeric(as.factor(df$subject))
 
-    workers = 15
+    workers = 7
     memory = 8000 * 1024^2
 
     parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_stim","rt_ndt","rt_prec",
@@ -103,7 +103,7 @@ Get_predictive = function(fit,df,n_draws, model){
   if(model == "full"){
     df$subject = as.numeric(as.factor(df$subject))
 
-    workers = 15
+    workers = 7
     memory = 10000 * 1024^2
 
     parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_stim","rt_ndt","rt_prec",
@@ -438,7 +438,193 @@ Get_predictive_group = function(fit,df,n_draws, model){
   if(model == "pure"){
     df$subject = as.numeric(as.factor(df$subject))
 
-    workers = 15
+    workers = 7
+    memory = 8000 * 1024^2
+
+    parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_prec","rt_stim",
+                   "conf_int","conf_ACC","conf_entropy","conf_entropy_ACC","conf_prec")
+
+    df_param = as_draws_df(fit$draws("gm")) %>%
+      select(-contains(".")) %>%
+      rename_with(~parameters) %>%
+      mutate(draw = 1:n()) %>%
+      pivot_longer(-draw, names_to = "variable")
+
+
+    constants = as_draws_df(fit$draws(c("rt_ndt","c0","c11"))) %>%
+      select(-contains(".")) %>%
+      mutate(draw = 1:n()) %>%
+      pivot_longer(-draw) %>%
+      extract(name, into = c("variable", "subject"),
+              regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE) %>% group_by(variable) %>%
+      summarize(mean = mean(value)) %>% pivot_wider(names_from = variable,values_from = mean)
+
+
+    # First we select the number of workers and then the memory:
+    plan(multisession, workers = workers)
+    options(future.globals.maxSize = memory)
+
+
+    # and draws per subject
+    draws <- 1:n_draws
+
+    # Only use the number of draws that the user wants:
+    dfq = df_param %>% filter(draw %in% draws)
+
+    # function to get the draws (goes through subjects and then the draws)
+    pred_list <- future_lapply(draws, function(d) {
+
+      # extract parameter vectors (mu, phi, c0 and c1) for that draw and that subject
+      params <- dfq %>%
+        filter(draw == d) %>%
+        select(variable, value) %>%
+        pivot_wider(names_from = "variable", values_from = "value")
+
+
+      psycho_ACC = function(x,alpha,beta,lapse){
+        lapse + (1 - 2 * lapse)*(brms::inv_logit_scaled(beta*(x-alpha)))
+      }
+      entropy = function(p){
+        -p * log(p) - (1-p) * log(1-p)
+      }
+
+      x = seq(-50,50,by = 0.5)
+      prob = psycho_ACC(x, params$alpha, exp(params$beta), brms::inv_logit_scaled(params$lapse)/2)
+
+      bin_pred = prob
+
+      rt_mu = params$rt_int + params$rt_slope * entropy(prob) + params$rt_stim * x
+
+      # apply inverse logit and scale
+      RT_pred = exp(rt_mu + exp(params$rt_prec)^2 / 2) +constants$rt_ndt
+
+      conf_dat = data.frame(prob = prob) %>%
+        rowwise() %>%
+        mutate(ACC = list(c(0,1))) %>% unnest(ACC)
+
+      conf_mu = params$conf_int +
+        params$conf_ACC * conf_dat$ACC +
+        params$conf_entropy * entropy(conf_dat$prob) +
+        params$conf_entropy_ACC * conf_dat$ACC * entropy(conf_dat$prob)
+
+      # Collect the responses from the ordered beta
+      confidence_pred = data.frame(pred = brms::inv_logit_scaled(conf_mu), ACC = conf_dat$ACC)
+
+      confidence_pred =  confidence_pred %>% mutate(ACC = ifelse(ACC == 1, "Correct","Incorrect")) %>%
+        pivot_wider(names_from = "ACC", values_from = pred,values_fn = list) %>% unnest(cols = c(Correct, Incorrect))
+
+      predictions = confidence_pred %>% mutate(bin_pred = bin_pred, RT_pred = RT_pred,
+                                               X = x, draw = d, prob = prob)
+
+      return(predictions)
+    },future.seed=TRUE)
+
+    # flatten nested list and create a tidy long dataframe
+    return(predictions = map_dfr(pred_list, bind_rows))
+  }
+  if(model == "full"){
+
+    df$subject = as.numeric(as.factor(df$subject))
+
+    workers = 7
+    memory = 10000 * 1024^2
+
+    parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_prec","rt_stim",
+                   "conf_int","conf_ACC","conf_entropy","conf_entropy_ACC","conf_prec",
+                   "meta_un","rt_un")
+
+    df_param = as_draws_df(fit$draws("gm")) %>%
+      dplyr::select(-contains(".")) %>%
+      rename_with(~parameters) %>%
+      mutate(draw = 1:n()) %>%
+      pivot_longer(-draw, names_to = "variable")
+
+
+
+    constants = as_draws_df(fit$draws(c("rt_ndt","c0","c11"))) %>%
+      dplyr::select(-contains(".")) %>%
+      mutate(draw = 1:n()) %>%
+      pivot_longer(-draw) %>%
+      extract(name, into = c("variable", "subject"),
+              regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE) %>% group_by(variable) %>%
+      summarize(mean = mean(value)) %>% pivot_wider(names_from = variable,values_from = mean)
+
+
+    # First we select the number of workers and then the memory:
+    plan(multisession, workers = workers)
+    options(future.globals.maxSize = memory)
+
+    #then the number of subjects
+    subjects <- unique(df$subject)
+    # and draws per subject
+    draws <- 1:n_draws
+
+    # Only use the number of draws that the user wants:
+    dfq = df_param %>% filter(draw %in% draws)
+
+    # function to get the draws (goes through subjects and then the draws)
+    pred_list <- future_lapply(draws, function(d) {
+
+      # extract parameter vectors (mu, phi, c0 and c1) for that draw and that subject
+      params <- dfq %>%
+        filter(draw == d) %>%
+        dplyr::select(variable, value) %>%
+        pivot_wider(names_from = "variable", values_from = "value")
+
+      psycho_ACC = function(x,alpha,beta,lapse){
+        lapse + (1 - 2 * lapse)*(brms::inv_logit_scaled(beta*(x-alpha)))
+      }
+      entropy = function(p){
+        -p * log(p) - (1-p) * log(1-p)
+      }
+
+      x = seq(-50,50,by = 0.5)
+      prob = psycho_ACC(x, params$alpha, exp(params$beta), brms::inv_logit_scaled(params$lapse)/2)
+
+      bin_pred = rbinom(length(prob),1,prob)
+
+      rt_mu = params$rt_int + params$rt_slope * entropy(psycho_ACC(x, params$alpha, exp(params$beta + params$rt_un), brms::inv_logit_scaled(params$lapse)/2)) + params$rt_stim * x
+
+
+      RT_pred = exp(rt_mu + exp(params$rt_prec)^2 / 2) +constants$rt_ndt
+
+      conf_prob = (psycho_ACC(x, params$alpha, exp(params$beta + params$meta_un), brms::inv_logit_scaled(params$lapse)/2))
+
+      conf_dat = data.frame(prob = conf_prob) %>%
+        rowwise() %>%
+        mutate(ACC = list(c(0,1))) %>% unnest(ACC)
+
+      conf_mu = params$conf_int +
+        params$conf_ACC * conf_dat$ACC +
+        params$conf_entropy * entropy(conf_dat$prob) +
+        params$conf_entropy_ACC * conf_dat$ACC * entropy(conf_dat$prob)
+
+      # Collect the responses from the ordered beta
+      confidence_pred = data.frame(pred = brms::inv_logit_scaled(conf_mu), ACC = conf_dat$ACC)
+
+
+      confidence_pred =  confidence_pred %>% mutate(ACC = ifelse(ACC == 1, "Correct","Incorrect")) %>%
+        pivot_wider(names_from = "ACC", values_from = pred,values_fn = list) %>% unnest(cols = c(Correct, Incorrect))
+
+      predictions = confidence_pred %>% mutate(bin_pred = bin_pred, RT_pred = RT_pred,
+                                               X = x, draw = d, prob = prob)
+
+      return(predictions)
+    },future.seed=TRUE)
+
+    # flatten nested list and create a tidy long dataframe
+    return(predictions = map_dfr(pred_list, bind_rows))
+
+  }
+
+}
+
+Get_predictive_group_responses = function(fit,df,n_draws, model){
+
+  if(model == "pure"){
+    df$subject = as.numeric(as.factor(df$subject))
+
+    workers = 7
     memory = 8000 * 1024^2
 
     parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_prec","rt_stim",
@@ -534,7 +720,7 @@ Get_predictive_group = function(fit,df,n_draws, model){
   if(model == "full"){
     df$subject = as.numeric(as.factor(df$subject))
 
-    workers = 15
+    workers = 7
     memory = 10000 * 1024^2
 
     parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_prec","rt_stim",
@@ -635,6 +821,630 @@ Get_predictive_group = function(fit,df,n_draws, model){
 
 }
 
+Get_predictive_subject_average = function(fit,df,n_draws,model){
+
+
+  if(model == "pure"){
+    df$subject = as.numeric(as.factor(df$subject))
+
+    workers = 7
+    memory = 8000 * 1024^2
+
+    parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_stim","rt_ndt","rt_prec",
+                   "conf_int","conf_ACC","conf_entropy","conf_entropy_ACC","c0","c11","conf_prec",
+                   "rho_p_rt","rho_p_conf","rho_rt_conf")
+
+    df_param = (fit$summary(parameters)) %>%
+      extract(variable,
+              into = c("variable", "subject"),
+              regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]",
+              convert = TRUE)
+
+
+
+    # First we select the number of workers and then the memory:
+    plan(multisession, workers = workers)
+    options(future.globals.maxSize = memory)
+
+    #then the number of subjects
+    subjects <- unique(df$subject)
+    # and draws per subject
+
+    # function to get the draws (goes through subjects and then the draws)
+    pred_list <- future_lapply(subjects, function(s) {
+
+      # extract parameter vectors (mu, phi, c0 and c1) for that draw and that subject
+      params <- df_param %>%
+        filter(subject == s) %>%
+        select(variable, median) %>%
+        pivot_wider(names_from = "variable", values_from = "median")
+
+
+      data = df %>% filter(subject == s)
+
+      psycho_ACC = function(x,alpha,beta,lapse){
+        lapse + (1 - 2 * lapse)*(brms::inv_logit_scaled(beta*(x-alpha)))
+      }
+      entropy = function(p){
+        -p * log(p) - (1-p) * log(1-p)
+      }
+
+      x = data$X
+      prob = psycho_ACC(x, params$alpha, exp(params$beta), params$lapse)
+
+      bin_pred = prob
+
+      rt_mu = params$rt_int + params$rt_slope * entropy(prob) + params$rt_stim * x
+      rt_ndt = params$rt_ndt
+
+      # apply inverse logit and scale
+      RT_pred = exp(rt_mu+params$rt_prec^2 / 2)+rt_ndt
+
+
+
+      conf_dat = data.frame(prob = prob) %>%
+        rowwise() %>%
+        mutate(ACC = list(c(0,1))) %>% unnest(ACC)
+
+      conf_mu = params$conf_int +
+        params$conf_ACC * conf_dat$ACC +
+        params$conf_entropy * entropy(conf_dat$prob) +
+        params$conf_entropy_ACC * conf_dat$ACC * entropy(conf_dat$prob)
+
+      # Collect the responses from the ordered beta
+      confidence_pred = data.frame(pred = brms::inv_logit_scaled(conf_mu), ACC = conf_dat$ACC)
+
+      confidence_pred =  confidence_pred %>% mutate(ACC = ifelse(ACC == 1, "Correct","Incorrect")) %>%
+        pivot_wider(names_from = "ACC", values_from = pred,values_fn = list) %>% unnest(cols = c(Correct, Incorrect))
+
+      predictions = confidence_pred %>% mutate(bin_pred = bin_pred, RT_pred = RT_pred,
+                                               X = x, subject = s, prob = prob)
+
+      return(predictions)
+    },
+    future.seed=TRUE)
+
+    # flatten nested list and create a tidy long dataframe
+    return(predictions = map_dfr(pred_list, bind_rows))
+
+
+  }
+  if(model == "full"){
+    df$subject = as.numeric(as.factor(df$subject))
+
+    workers = 7
+    memory = 10000 * 1024^2
+
+    parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_stim","rt_ndt","rt_prec",
+                   "conf_int","conf_ACC","conf_entropy","conf_entropy_ACC","c0","c11","conf_prec",
+                   "meta_un","rt_un",
+                   "rho_p_rt","rho_p_conf","rho_rt_conf")
+
+    df_param = as_draws_df(fit$draws(parameters)) %>%
+      select(-contains(".")) %>%
+      mutate(draw = 1:n()) %>%
+      pivot_longer(-draw) %>%
+      extract(name, into = c("variable", "subject"),
+              regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE)
+
+
+
+    # First we select the number of workers and then the memory:
+    plan(multisession, workers = workers)
+    options(future.globals.maxSize = memory)
+
+    #then the number of subjects
+    subjects <- unique(df$subject)
+    # and draws per subject
+    draws <- 1:n_draws
+
+    # Only use the number of draws that the user wants:
+    dfq = df_param %>% filter(draw %in% draws)
+
+    # function to get the draws (goes through subjects and then the draws)
+    pred_list <- future_lapply(subjects, function(s) {
+      lapply(draws, function(d) {
+
+        # extract parameter vectors (mu, phi, c0 and c1) for that draw and that subject
+        params <- dfq %>%
+          filter(subject == s, draw == d) %>%
+          select(variable, value) %>%
+          pivot_wider(names_from = "variable", values_from = "value")
+
+
+        data = df %>% filter(subject == s)
+
+        psycho_ACC = function(x,alpha,beta,lapse){
+          lapse + (1 - 2 * lapse)*(brms::inv_logit_scaled(beta*(x-alpha)))
+        }
+        entropy = function(p){
+          -p * log(p) - (1-p) * log(1-p)
+        }
+
+        x = data$X
+        prob = psycho_ACC(x, params$alpha, exp(params$beta), params$lapse)
+
+        bin_pred = rbinom(length(prob),1,prob)
+
+        rt_mu = params$rt_int + params$rt_slope * entropy(psycho_ACC(x, params$alpha, exp(params$beta + params$rt_un), params$lapse)) + params$rt_stim * x
+        rt_ndt = params$rt_ndt
+
+        # apply inverse logit and scale
+        RT_pred = rlnorm(length(rt_mu),rt_mu,params$rt_prec)+rt_ndt
+
+
+        conf_prob = entropy(psycho_ACC(x, params$alpha, exp(params$beta + params$meta_un), params$lapse))
+
+        conf_dat = data.frame(prob = conf_prob) %>%
+          rowwise() %>%
+          mutate(ACC = list(c(0,1))) %>% unnest(ACC)
+
+        conf_mu = params$conf_int +
+          params$conf_ACC * conf_dat$ACC +
+          params$conf_entropy * entropy(conf_dat$prob) +
+          params$conf_entropy_ACC * conf_dat$ACC * entropy(conf_dat$prob)
+
+        # Collect the responses from the ordered beta
+        confidence_pred = data.frame()
+        for(i in 1:length(conf_mu)){
+          q = rordbeta(1, mu = brms::inv_logit_scaled(conf_mu[i]),
+                       phi = params$conf_prec,
+                       cutpoints = c(params$c0, params$c0 + exp(params$c11)))
+
+          dat = data.frame(pred = q, ACC = conf_dat$ACC[i])
+
+          confidence_pred = rbind(confidence_pred, dat)
+        }
+
+        confidence_pred =  confidence_pred %>% mutate(ACC = ifelse(ACC == 1, "Correct","Incorrect")) %>%
+          pivot_wider(names_from = "ACC", values_from = pred,values_fn = list) %>% unnest(cols = c(Correct, Incorrect))
+
+        predictions = confidence_pred %>% mutate(bin_pred = bin_pred, RT_pred = RT_pred,
+                                                 X = x, draw = d, subject = s, prob = prob)
+
+        return(predictions)
+      })
+    },future.seed=TRUE)
+
+    # flatten nested list and create a tidy long dataframe
+    return(predictions = map_dfr(pred_list, bind_rows))
+
+  }
+
+
+}
+
+Get_predictive_subject_average_responses = function(fit,df,n_draws,model){
+
+
+  if(model == "pure"){
+    df$subject = as.numeric(as.factor(df$subject))
+
+    workers = 7
+    memory = 8000 * 1024^2
+
+    parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_stim","rt_ndt","rt_prec",
+                   "conf_int","conf_ACC","conf_entropy","conf_entropy_ACC","c0","c11","conf_prec",
+                   "rho_p_rt","rho_p_conf","rho_rt_conf")
+
+    df_param = (fit$summary(parameters)) %>%
+      extract(variable,
+              into = c("variable", "subject"),
+              regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]",
+              convert = TRUE)
+
+
+
+    # First we select the number of workers and then the memory:
+    plan(multisession, workers = workers)
+    options(future.globals.maxSize = memory)
+
+    #then the number of subjects
+    subjects <- unique(df$subject)
+    # and draws per subject
+
+    # function to get the draws (goes through subjects and then the draws)
+    pred_list <- future_lapply(subjects, function(s) {
+
+        # extract parameter vectors (mu, phi, c0 and c1) for that draw and that subject
+        params <- df_param %>%
+          filter(subject == s) %>%
+          select(variable, median) %>%
+          pivot_wider(names_from = "variable", values_from = "median")
+
+
+        data = df %>% filter(subject == s)
+
+        psycho_ACC = function(x,alpha,beta,lapse){
+          lapse + (1 - 2 * lapse)*(brms::inv_logit_scaled(beta*(x-alpha)))
+        }
+        entropy = function(p){
+          -p * log(p) - (1-p) * log(1-p)
+        }
+
+        x = data$X
+        prob = psycho_ACC(x, params$alpha, exp(params$beta), params$lapse)
+
+        bin_pred = rbinom(length(prob),1,prob)
+
+        rt_mu = params$rt_int + params$rt_slope * entropy(prob) + params$rt_stim * x
+        rt_ndt = params$rt_ndt
+
+        # apply inverse logit and scale
+        RT_pred = rlnorm(length(rt_mu),rt_mu,params$rt_prec)+rt_ndt
+
+
+
+        conf_dat = data.frame(prob = prob) %>%
+          rowwise() %>%
+          mutate(ACC = list(c(0,1))) %>% unnest(ACC)
+
+        conf_mu = params$conf_int +
+          params$conf_ACC * conf_dat$ACC +
+          params$conf_entropy * entropy(conf_dat$prob) +
+          params$conf_entropy_ACC * conf_dat$ACC * entropy(conf_dat$prob)
+
+        # Collect the responses from the ordered beta
+        confidence_pred = data.frame()
+        for(i in 1:length(conf_mu)){
+          q = rordbeta(1, mu = brms::inv_logit_scaled(conf_mu[i]),
+                       phi = params$conf_prec,
+                       cutpoints = c(params$c0, params$c0 + exp(params$c11)))
+
+          dat = data.frame(pred = q, ACC = conf_dat$ACC[i])
+
+          confidence_pred = rbind(confidence_pred, dat)
+        }
+
+        confidence_pred =  confidence_pred %>% mutate(ACC = ifelse(ACC == 1, "Correct","Incorrect")) %>%
+          pivot_wider(names_from = "ACC", values_from = pred,values_fn = list) %>% unnest(cols = c(Correct, Incorrect))
+
+        predictions = confidence_pred %>% mutate(bin_pred = bin_pred, RT_pred = RT_pred,
+                                                 X = x, subject = s, prob = prob)
+
+        return(predictions)
+      },
+      future.seed=TRUE)
+
+    # flatten nested list and create a tidy long dataframe
+    return(predictions = map_dfr(pred_list, bind_rows))
+
+
+  }
+  if(model == "full"){
+    df$subject = as.numeric(as.factor(df$subject))
+
+    workers = 7
+    memory = 10000 * 1024^2
+
+    parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_stim","rt_ndt","rt_prec",
+                   "conf_int","conf_ACC","conf_entropy","conf_entropy_ACC","c0","c11","conf_prec",
+                   "meta_un","rt_un",
+                   "rho_p_rt","rho_p_conf","rho_rt_conf")
+
+    df_param = as_draws_df(fit$draws(parameters)) %>%
+      select(-contains(".")) %>%
+      mutate(draw = 1:n()) %>%
+      pivot_longer(-draw) %>%
+      extract(name, into = c("variable", "subject"),
+              regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE)
+
+
+
+    # First we select the number of workers and then the memory:
+    plan(multisession, workers = workers)
+    options(future.globals.maxSize = memory)
+
+    #then the number of subjects
+    subjects <- unique(df$subject)
+    # and draws per subject
+    draws <- 1:n_draws
+
+    # Only use the number of draws that the user wants:
+    dfq = df_param %>% filter(draw %in% draws)
+
+    # function to get the draws (goes through subjects and then the draws)
+    pred_list <- future_lapply(subjects, function(s) {
+      lapply(draws, function(d) {
+
+        # extract parameter vectors (mu, phi, c0 and c1) for that draw and that subject
+        params <- dfq %>%
+          filter(subject == s, draw == d) %>%
+          select(variable, value) %>%
+          pivot_wider(names_from = "variable", values_from = "value")
+
+
+        data = df %>% filter(subject == s)
+
+        psycho_ACC = function(x,alpha,beta,lapse){
+          lapse + (1 - 2 * lapse)*(brms::inv_logit_scaled(beta*(x-alpha)))
+        }
+        entropy = function(p){
+          -p * log(p) - (1-p) * log(1-p)
+        }
+
+        x = data$X
+        prob = psycho_ACC(x, params$alpha, exp(params$beta), params$lapse)
+
+        bin_pred = rbinom(length(prob),1,prob)
+
+        rt_mu = params$rt_int + params$rt_slope * entropy(psycho_ACC(x, params$alpha, exp(params$beta + params$rt_un), params$lapse)) + params$rt_stim * x
+        rt_ndt = params$rt_ndt
+
+        # apply inverse logit and scale
+        RT_pred = rlnorm(length(rt_mu),rt_mu,params$rt_prec)+rt_ndt
+
+
+        conf_prob = entropy(psycho_ACC(x, params$alpha, exp(params$beta + params$meta_un), params$lapse))
+
+        conf_dat = data.frame(prob = conf_prob) %>%
+          rowwise() %>%
+          mutate(ACC = list(c(0,1))) %>% unnest(ACC)
+
+        conf_mu = params$conf_int +
+          params$conf_ACC * conf_dat$ACC +
+          params$conf_entropy * entropy(conf_dat$prob) +
+          params$conf_entropy_ACC * conf_dat$ACC * entropy(conf_dat$prob)
+
+        # Collect the responses from the ordered beta
+        confidence_pred = data.frame()
+        for(i in 1:length(conf_mu)){
+          q = rordbeta(1, mu = brms::inv_logit_scaled(conf_mu[i]),
+                       phi = params$conf_prec,
+                       cutpoints = c(params$c0, params$c0 + exp(params$c11)))
+
+          dat = data.frame(pred = q, ACC = conf_dat$ACC[i])
+
+          confidence_pred = rbind(confidence_pred, dat)
+        }
+
+        confidence_pred =  confidence_pred %>% mutate(ACC = ifelse(ACC == 1, "Correct","Incorrect")) %>%
+          pivot_wider(names_from = "ACC", values_from = pred,values_fn = list) %>% unnest(cols = c(Correct, Incorrect))
+
+        predictions = confidence_pred %>% mutate(bin_pred = bin_pred, RT_pred = RT_pred,
+                                                 X = x, draw = d, subject = s, prob = prob)
+
+        return(predictions)
+      })
+    },future.seed=TRUE)
+
+    # flatten nested list and create a tidy long dataframe
+    return(predictions = map_dfr(pred_list, bind_rows))
+
+  }
+
+
+}
+
+
+
+Get_predictive_new_subject = function(fit, df, n_draws, model) {
+
+  n_subjects = 10
+  df$subject = as.numeric(as.factor(df$subject))
+
+  workers = 7
+  memory = 10000 * 1024^2
+
+  # Extract group means, tau (SDs), and correlation matrix
+  gm_draws = as_draws_df(fit$draws("gm"))
+  tau_draws = as_draws_df(fit$draws("tau_u"))
+  L_u_draws = as_draws_df(fit$draws("L_u"))
+
+  # Also need constants
+  constants = as_draws_df(fit$draws(c("rt_ndt","c0","c11"))) %>%
+    dplyr::select(-contains(".")) %>%
+    mutate(draw = 1:n()) %>%
+    pivot_longer(-draw) %>%
+    extract(name, into = c("variable", "subject"),
+            regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE) %>%
+    group_by(variable) %>%
+    summarize(mean = mean(value)) %>%
+    pivot_wider(names_from = variable, values_from = mean)
+
+  plan(multisession, workers = workers)
+  options(future.globals.maxSize = memory)
+
+  draws <- 1:100
+
+  if(model == "pure") {
+
+    # Function to generate predictions
+    pred_list <- future_lapply(draws, function(d) {
+
+      # Extract group means for this draw
+      gm = gm_draws[d, ] %>% dplyr::select(-contains(".")) %>% as.numeric()
+
+      # Extract tau (SDs) for this draw
+      tau = tau_draws[d, ] %>% dplyr::select(-contains(".")) %>% as.numeric()
+
+      # Extract L_u (Cholesky of correlation matrix) for this draw
+      # Need to reconstruct the matrix from the draws
+      P = 12  # number of parameters
+      L_u = matrix(0, P, P)
+      L_u_vec = L_u_draws[d, ] %>% dplyr::select(-contains(".")) %>% as.numeric()
+
+      # Fill in the lower triangular Cholesky factor
+      idx = 1
+      for(i in 1:P) {
+        for(j in 1:i) {
+          L_u[i, j] = L_u_vec[idx]
+          idx = idx + 1
+        }
+      }
+
+      # Covariance matrix = diag(tau) * L_u * L_u' * diag(tau)
+      Sigma = diag(tau) %*% L_u %*% t(L_u) %*% diag(tau)
+
+      # Generate n_subjects new hypothetical subjects
+      library(MASS)
+      subject_params = mvrnorm(n_subjects, mu = gm, Sigma = Sigma)
+
+      # Now generate predictions for each hypothetical subject
+      subject_predictions = lapply(1:n_subjects, function(s) {
+
+        params = subject_params[s, ]
+        names(params) = c("alpha", "beta", "lapse", "rt_int", "rt_slope",
+                          "rt_prec_raw", "rt_stim", "conf_int", "conf_ACC",
+                          "conf_entropy", "conf_entropy_ACC", "conf_prec_raw")
+
+        params["rt_prec"] = exp(params["rt_prec_raw"])  # This is sigma
+        params["conf_prec"] = exp(params["conf_prec_raw"])
+
+        psycho_ACC = function(x, alpha, beta, lapse){
+          lapse + (1 - 2 * lapse) * (brms::inv_logit_scaled(beta * (x - alpha)))
+        }
+        entropy = function(p){
+          -p * log(p) - (1-p) * log(1-p)
+        }
+
+        x = seq(-50, 50, by = 2)
+        prob = psycho_ACC(x, params["alpha"], exp(params["beta"]),
+                          brms::inv_logit_scaled(params["lapse"])/2)
+
+        bin_pred = prob  # Expected value
+
+        rt_mu = params["rt_int"] + params["rt_slope"] * entropy(prob) +
+          params["rt_stim"] * x
+
+        RT_pred = exp(rt_mu + params["rt_prec"]^2 / 2) + constants$rt_ndt
+
+        conf_dat = data.frame(prob = prob) %>%
+          rowwise() %>%
+          mutate(ACC = list(c(0, 1))) %>%
+          unnest(ACC)
+
+        conf_mu = params["conf_int"] +
+          params["conf_ACC"] * conf_dat$ACC +
+          params["conf_entropy"] * entropy(conf_dat$prob) +
+          params["conf_entropy_ACC"] * conf_dat$ACC * entropy(conf_dat$prob)
+
+        confidence_pred = data.frame(
+          pred = brms::inv_logit_scaled(conf_mu),
+          ACC = conf_dat$ACC
+        )
+
+        confidence_pred = confidence_pred %>%
+          mutate(ACC = ifelse(ACC == 1, "Correct", "Incorrect")) %>%
+          pivot_wider(names_from = "ACC", values_from = pred, values_fn = list) %>%
+          unnest(cols = c(Correct, Incorrect))
+
+        predictions = confidence_pred %>%
+          mutate(bin_pred = bin_pred, RT_pred = RT_pred,
+                 X = x, draw = d, hyp_subject = s, prob = prob)
+
+        return(predictions)
+      })
+
+      return(bind_rows(subject_predictions))
+    }, future.seed = TRUE)
+
+    return(predictions = map_dfr(pred_list, bind_rows))
+  }
+  if(model == "full"){
+
+    pred_list <- future_lapply(draws, function(d) {
+
+      # Extract group means for this draw
+      gm = gm_draws[d, ] %>% dplyr::select(-contains(".")) %>% as.numeric()
+
+      # Extract tau (SDs) for this draw
+      tau = tau_draws[d, ] %>% dplyr::select(-contains(".")) %>% as.numeric()
+
+      # Extract L_u (Cholesky of correlation matrix) for this draw
+      # Need to reconstruct the matrix from the draws
+      P = 14  # number of parameters
+      L_u = matrix(0, P, P)
+      L_u_vec = L_u_draws[d, ] %>% dplyr::select(-contains(".")) %>% as.numeric()
+
+      # Fill in the lower triangular Cholesky factor
+      idx = 1
+      for(i in 1:P) {
+        for(j in 1:i) {
+          L_u[i, j] = L_u_vec[idx]
+          idx = idx + 1
+        }
+      }
+
+      # Covariance matrix = diag(tau) * L_u * L_u' * diag(tau)
+      Sigma = diag(tau) %*% L_u %*% t(L_u) %*% diag(tau)
+
+      # Generate n_subjects new hypothetical subjects
+      library(MASS)
+      subject_params = mvrnorm(n_subjects, mu = gm, Sigma = Sigma)
+
+      # Now generate predictions for each hypothetical subject
+      subject_predictions = lapply(1:n_subjects, function(s) {
+
+        params = subject_params[s, ]
+        names(params) = c("alpha", "beta", "lapse", "rt_int", "rt_slope",
+                          "rt_prec_raw", "rt_stim", "conf_int", "conf_ACC",
+                          "conf_entropy", "conf_entropy_ACC", "conf_prec_raw","meta_un","rt_un")
+
+        params["rt_prec"] = exp(params["rt_prec_raw"])  # This is sigma
+        params["conf_prec"] = exp(params["conf_prec_raw"])
+
+        psycho_ACC = function(x, alpha, beta, lapse){
+          lapse + (1 - 2 * lapse) * (brms::inv_logit_scaled(beta * (x - alpha)))
+        }
+        entropy = function(p){
+          -p * log(p) - (1-p) * log(1-p)
+        }
+
+        x = seq(-50, 50, by = 2)
+        prob = psycho_ACC(x, params["alpha"], exp(params["beta"]),
+                          brms::inv_logit_scaled(params["lapse"])/2)
+
+        bin_pred = prob  # Expected value
+
+        rt_prob = psycho_ACC(x, params["alpha"], exp(params["beta"] + params["rt_un"]),
+                                    brms::inv_logit_scaled(params["lapse"])/2)
+
+        conf_prob = psycho_ACC(x, params["alpha"], exp(params["beta"] + params["meta_un"]),
+                             brms::inv_logit_scaled(params["lapse"])/2)
+
+
+        rt_mu = params["rt_int"] + params["rt_slope"] * entropy(rt_prob) +
+          params["rt_stim"] * x
+
+        RT_pred = exp(rt_mu + params["rt_prec"]^2 / 2) + constants$rt_ndt
+
+        conf_dat = data.frame(prob = conf_prob) %>%
+          rowwise() %>%
+          mutate(ACC = list(c(0, 1))) %>%
+          unnest(ACC)
+
+        conf_mu = params["conf_int"] +
+          params["conf_ACC"] * conf_dat$ACC +
+          params["conf_entropy"] * entropy(conf_dat$prob) +
+          params["conf_entropy_ACC"] * conf_dat$ACC * entropy(conf_dat$prob)
+
+        confidence_pred = data.frame(
+          pred = brms::inv_logit_scaled(conf_mu),
+          ACC = conf_dat$ACC
+        )
+
+        confidence_pred = confidence_pred %>%
+          mutate(ACC = ifelse(ACC == 1, "Correct", "Incorrect")) %>%
+          pivot_wider(names_from = "ACC", values_from = pred, values_fn = list) %>%
+          unnest(cols = c(Correct, Incorrect))
+
+        predictions = confidence_pred %>%
+          mutate(bin_pred = bin_pred, RT_pred = RT_pred,
+                 X = x, draw = d, hyp_subject = s, prob = prob)
+
+        return(predictions)
+      })
+
+      return(bind_rows(subject_predictions))
+    }, future.seed = TRUE)
+
+    return(predictions = map_dfr(pred_list, bind_rows))
+
+  }
+}
+
+
 
 group_predictive = function(predictions,df){
 
@@ -711,15 +1521,18 @@ group_predictive = function(predictions,df){
         geom_ribbon(aes(x = X, y = mean,ymin = q5,ymax = q95, fill = Correct),alpha = 0.1)+
         geom_ribbon(aes(x = X, y = mean,ymin = q10,ymax = q90, fill = Correct),alpha = 0.3)+
         geom_ribbon(aes(x = X, y = mean,ymin = q20,ymax = q80, fill = Correct),alpha = 0.5)+
-        geom_pointrange(data = dataq , aes(x = X, y = mean, ymin = q5, ymax = q95,color = as.factor(Correct))) +   # only affects responseConf
-        geom_line(aes(x = X, y = mean, color = Correct))+
-      facet_wrap(~name, scales = "free", ncol = 1) +
+        geom_pointrange(data = dataq , aes(x = X, y = mean, ymin = q5, ymax = q95,fill = as.factor(Correct)),
+                        shape = 21, color = "black", alpha = 0.5) +   # only affects responseConf
+        geom_line(aes(x = X, y = mean, color = Correct), linewidth = 1)+
+      facet_wrap(~name, scales = "free", ncol = 3) +
       theme_classic(base_size = 16) +
       labs(color = "Correct")+
       geom_vline(xintercept = 0, linetype = 2)+
       theme(legend.position = "top")
-
+   plot
   return(plot)
 
 
 }
+
+

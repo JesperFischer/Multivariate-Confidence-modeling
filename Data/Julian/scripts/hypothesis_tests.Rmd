@@ -1,0 +1,1030 @@
+---
+title: 'The effect of report order on metacognition'
+subtitle: "Hypothesis tests"
+author: "Julian Matthews, Narumi Sugihara, Sofia Nagisa, Hiroki Ohashi, Kazuhisa Shibata"
+date: "Compiled: `r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load packages
+library(tidyverse)
+library(BayesFactor)
+library(bayestestR)
+library(lmerTest)
+library(emmeans)
+library(broman)
+
+# Test iterations
+num_iterations <- 1e5
+
+# Locate data
+data_location <- here::here("Data","Julian","Data")
+
+# Condition labels
+domain_labels <- c("perception", "memory")
+response_labels <- c("D→C", "D+C", "C→D")
+motor_time_labels <- c("baseline",
+                       "time limited",
+                       "motor fixed")
+motor_labels <- c("motor randomised", "motor fixed")
+time_labels <- c("timing unlimited", "timing limited")
+
+# Define functions ----
+
+## Assigns appropriate classes to variables in "group_data"
+assign_group_variables <- function(group_data) {
+  
+  # Convert to factors
+  group_data$experiment <- factor(group_data$experiment)
+  group_data$version <- factor(group_data$version)
+  group_data$subj_num <- factor(paste0("#", substr(group_data$subjID, 1, 3)))
+  group_data$subjID <- factor(group_data$subjID)
+  group_data$system <- factor(group_data$system)
+  group_data$day <- ordered(group_data$day)
+  group_data$overall_block <- ordered(group_data$overall_block)
+  group_data$block <- ordered(group_data$block)
+  
+  # Conditions
+  group_data$domain_type <- factor(
+    group_data$domain_type,
+    levels = c("perception", "memory"),
+    labels = domain_labels
+  )
+  group_data$response_type <- factor(
+    group_data$response_type,
+    levels = c("decision_then_confidence", "decision_and_confidence", "confidence_then_decision"),
+    labels = response_labels
+  )
+  group_data$motor_time_type <- factor(
+    group_data$motor_time_type,
+    levels = c("MR_TU", "MR_TC", "MF_TU"),
+    labels = motor_time_labels
+  )
+  group_data$motor_condition <- factor(
+    group_data$motor_condition,
+    levels = c("randomised", "fixed"),
+    labels = motor_labels
+  )
+  group_data$time_condition <- factor(
+    group_data$time_condition,
+    levels = c("unconstrained", "constrained"),
+    labels = time_labels
+  )
+  
+  return(group_data)
+}
+
+## Assigns appropriate classes to variables in "demographics"
+assign_demographic_variables <- function(demographics){
+  
+  demographics$experiment <- factor(demographics$experiment)
+  demographics$version <- factor(demographics$version)
+  demographics$subj_num <- factor(paste0("#", substr(demographics$subjID, 1, 3)))
+  demographics$subjID <- factor(demographics$subjID)
+  demographics$date_started <- as.Date.character(demographics$date_started)
+  demographics$date_finished <- as.Date.character(demographics$date_finished)
+  demographics$gender <- factor(demographics$gender,
+                                levels = c("f", "m", "n"),
+                                labels = c("female", "male","non-binary"))
+  demographics$age <- as.numeric(demographics$age)
+  demographics$handedness <- factor(demographics$handedness,
+                                    levels = c("r","l", "a"),
+                                    labels = c("right","left","ambidextrous"))
+  
+  return(demographics)
+}
+
+## Pairwise comparison of report orders
+pairwise_comparison <- function(input_data, report_type1, report_type2){
+  
+  # Filter subjects with efficiency=NA in either or both reports
+  filtered_data <- input_data |> 
+    filter(response_type %in% c(report_type1, report_type2)) |> 
+    group_by(subjID) |> 
+    filter(!any(is.na(efficiency))) |> 
+    tidyr::pivot_wider(id_cols = subjID, names_from = response_type, values_from = efficiency)
+  
+  # NB! For BF t-tests, "medium" corresponds to an rscale of (sqrt(2)/2). For BF ANOVA, "wide" corresponds to an rscale of (sqrt(2)/2).
+  
+  # Run the comparison
+  ttestBF(
+  x = filtered_data[[report_type1]],
+  y = filtered_data[[report_type2]],
+  paired = TRUE, rscale = "medium") %>%
+  extractBF %>% 
+  .$bf
+}
+
+theme_julian <- function () { 
+  theme_classic() +
+    theme(
+      axis.line = element_blank(),
+      panel.border = element_rect(colour = "grey", fill = NA, linewidth = 1),
+      panel.background = element_rect(fill = "white"),
+      axis.ticks = element_line(colour = "grey", linewidth = 1),
+      panel.grid = element_blank(),
+      axis.title = element_text(face = "bold", size = 11, colour = "black"),
+      axis.text = element_text(face = "plain", size = 11, colour = "black"),
+      plot.title = element_text(size=12, face="bold", colour = "black"),
+      plot.subtitle = element_text(size=11, face="plain", colour = "black"),
+      legend.title = element_text(size=11, face="bold", colour = "black"),
+      legend.text = element_text(size=11, colour = "black"),
+      strip.background = element_rect(colour = "grey", fill = "grey"),
+      strip.text = element_text(size=10, face = "plain", colour = "black")
+    )
+}
+
+```
+
+# Background
+
+Task decisions and confidence ratings are fundamental measures in metacognition research, but using these reports requires collecting them in some order. Only three orders exist and are used in an ad hoc manner across studies. Evidence suggests that when task decisions precede confidence, this report order can enhance metacognition. If verified, this effect pervades studies of metacognition and will lead the synthesis of this literature to invalid conclusions. Here, we test the effect of report order across popular domains of metacognition and probe two factors that may underlie why order effects have been observed in past studies: report time and motor preparation. We examine these effects in perception and memory domains.
+
+> This RMarkdown file runs the analysis for our registered hypotheses.
+
+***
+
+## Prepare data
+
+```{r exclusions,include=TRUE}
+
+# Exclude participant that quit experiment after Day #1
+excluded_participants.exp1 <- c("008_RM","105_KK","111_RY")
+
+excluded_participants.exp2 <- c("103_HK","402_MS")
+
+```
+
+```{r load_data,include=FALSE}
+
+# Load experiment 1 ----
+
+# Load data
+group_data.exp1 <- read.csv(here::here(data_location,
+                                   "block_data_experiment1.csv"), na.strings = "NaN")
+demographics.exp1 <- read.csv(here::here(data_location,
+                                     "demographics_experiment1.csv"), na.strings = "NaN")
+
+# Compute total number of participants
+pp_number.exp1_total <- length(demographics.exp1$subjID)
+
+# Add any uncompleted participant IDs to excluded list
+exclusions <- unique(group_data.exp1[group_data.exp1$completed==FALSE,"subjID"])
+excluded_participants.exp1 <- unique(c(excluded_participants.exp1, exclusions))
+
+# Filter out excluded blocks
+group_data.exp1$include_block <- as.logical(group_data.exp1$include_block)
+group_data.exp1 <- group_data.exp1 %>%
+  mutate(
+    efficiency = if_else(include_block, efficiency, NA_real_),
+    mean_accuracy = if_else(include_block, mean_accuracy, NA_real_),
+    mean_confidence = if_else(include_block, mean_confidence, NA_real_),
+    median_confidence = if_else(include_block, median_confidence, NA_real_),
+    mean_total_RT = if_else(include_block, mean_total_RT, NA_real_),
+    mean_log_RT = if_else(include_block, mean_log_RT, NA_real_),
+    sensitivity = if_else(include_block, sensitivity, NA_real_),
+    criterion = if_else(include_block, criterion, NA_real_),
+    metad = if_else(include_block, metad, NA_real_),
+    m_difference = if_else(include_block, m_difference, NA_real_)
+  )
+
+# Subset to included data
+group_data.exp1 <- group_data.exp1 |> filter(!subjID %in% excluded_participants.exp1)
+demographics.exp1 <- demographics.exp1 |> filter(!subjID %in% excluded_participants.exp1)
+
+# Class coding & assignments
+group_data.exp1 <- assign_group_variables(group_data.exp1)
+demographics.exp1 <- assign_demographic_variables(demographics.exp1)
+
+# Compute participant numbers
+pp_number.exp1_included <- length(demographics.exp1$subjID)
+pp_number.exp1_excluded <- pp_number.exp1_total - pp_number.exp1_included
+
+# Load experiment 2 ----
+
+# Load data
+group_data.exp2 <- read.csv(paste0(data_location,
+                                   "block_data_experiment2.csv"), na.strings = "NaN")
+demographics.exp2 <- read.csv(paste0(data_location,
+                                     "demographics_experiment2.csv"), na.strings = "NaN")
+
+# Compute total number of participants
+pp_number.exp2_total <- length(demographics.exp2$subjID)
+
+# Add any uncompleted participant IDs to excluded list
+exclusions <- unique(group_data.exp2[group_data.exp2$completed==FALSE,"subjID"])
+excluded_participants.exp2 <- unique(c(excluded_participants.exp2, exclusions))
+
+# Filter out excluded blocks
+group_data.exp2$include_block <- as.logical(group_data.exp2$include_block)
+group_data.exp2 <- group_data.exp2 %>%
+  mutate(
+    efficiency = if_else(include_block, efficiency, NA_real_),
+    mean_accuracy = if_else(include_block, mean_accuracy, NA_real_),
+    mean_confidence = if_else(include_block, mean_confidence, NA_real_),
+    median_confidence = if_else(include_block, median_confidence, NA_real_),
+    mean_total_RT = if_else(include_block, mean_total_RT, NA_real_),
+    mean_log_RT = if_else(include_block, mean_log_RT, NA_real_),
+    sensitivity = if_else(include_block, sensitivity, NA_real_),
+    criterion = if_else(include_block, criterion, NA_real_),
+    metad = if_else(include_block, metad, NA_real_),
+    m_difference = if_else(include_block, m_difference, NA_real_)
+  )
+
+# Subset to included data
+group_data.exp2 <- group_data.exp2 |> filter(!subjID %in% excluded_participants.exp2)
+demographics.exp2 <- demographics.exp2 |> filter(!subjID %in% excluded_participants.exp2)
+
+# Class coding & assignments
+group_data.exp2 <- assign_group_variables(group_data.exp2)
+demographics.exp2 <- assign_demographic_variables(demographics.exp2)
+
+# Compute participant numbers
+pp_number.exp2_included <- length(demographics.exp2$subjID)
+pp_number.exp2_excluded <- pp_number.exp2_total - pp_number.exp2_included
+
+```
+
+### Experiment 1: perception
+
+Experiment 1 tested the effect of report order on metacognition in a perception task. This experiment included **`r pp_number.exp1_included` participants** (`r sum(demographics.exp1$gender=="female")` female, `r sum(demographics.exp1$gender=="male")` male, `r sum(demographics.exp1$gender=="non-binary")` non-binary, median age=`r median(demographics.exp1$age, na.rm = TRUE)`, mean age=`r myround(mean(demographics.exp1$age, na.rm = TRUE),2)`, SD=`r myround(sd(demographics.exp1$age, na.rm = TRUE),2)`). The number of excluded participants was `r pp_number.exp1_excluded`.
+
+```{r exp1_demographics,echo=FALSE, warning=FALSE, include=TRUE, fig.height = 4, fig.width = 6, fig.align = "center"}
+
+ggplot(data = demographics.exp1, aes(x = age, fill = gender)) + 
+  geom_histogram(bins = 60) + theme_julian() + 
+  geom_hline(yintercept = 0, colour = "grey", size = 0.5) +
+  scale_fill_manual(values = c("slategray2", "slategray3","slategray4")) +
+  theme(
+    plot.subtitle = element_text(size=8),
+    legend.position = c(0.85,0.85), legend.title = element_blank()
+  )
+
+```
+
+### Experiment 2: memory
+
+Experiment 2 tested the effect of report order on metacognition in a memory task. This experiment included **`r pp_number.exp2_included` participants** (`r sum(demographics.exp2$gender=="female")` female, `r sum(demographics.exp2$gender=="male")` male, `r sum(demographics.exp2$gender=="non-binary")` non-binary, median age=`r median(demographics.exp2$age, na.rm = TRUE)`, mean age=`r myround(mean(demographics.exp2$age, na.rm = TRUE),2)`, SD=`r myround(sd(demographics.exp2$age, na.rm = TRUE),2)`). The number of excluded participants was `r pp_number.exp2_excluded`.
+
+```{r exp2_demographics,echo=FALSE, warning=FALSE, include=TRUE, fig.height = 4, fig.width = 6, fig.align = "center"}
+
+ggplot(data = demographics.exp2, aes(x = age, fill = gender)) + 
+  geom_histogram(bins = 60) + theme_julian() + 
+  geom_hline(yintercept = 0, colour = "grey", size = 0.5) +
+  scale_fill_manual(values = c("slategray2", "slategray3","slategray4")) +
+  theme(
+    plot.subtitle = element_text(size=8),
+    legend.position = c(0.85,0.85), legend.title = element_blank()
+  )
+
+```
+
+***
+
+# Hypothesis 1
+
+> Does limiting report time speed total reaction times?
+
+Subsetting data to the baseline and time limited contexts, a main effect of report context on mean reaction time will be observed. Reaction times will be faster in the time limited context than in the baseline context.
+
+### Experiment 1: perception
+
+```{r hypothesis_1_exp1, echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp1 |> 
+  filter(include_block == TRUE) |> 
+  filter(motor_time_type %in% c("baseline", "time limited"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(motor_time_type) |> 
+  rename(`report context` = motor_time_type) |> 
+  summarise(M = mean(mean_total_RT, na.rm = TRUE),
+            SD = sd(mean_total_RT, na.rm = TRUE))
+
+# Bayesian model comparison
+hypothesis1.exp1.bf <- anovaBF(mean_total_RT ~ motor_time_type + subjID,
+                     whichRandom = "subjID",
+                     data = test_data,
+                     progress = FALSE,
+                     rscaleFixed = "wide",
+                     rscaleRandom = "nuisance",
+                     whichModels = "withmain",
+                     iterations = num_iterations)
+
+hypothesis1.exp1.inclusion <- bayesfactor_inclusion(hypothesis1.exp1.bf, match_models = TRUE)
+
+```
+
+In Experiment 1, the main effect of report context on mean total reaction time was **BF~10~ = `r round(exp(hypothesis1.exp1.inclusion$log_BF[2]),3)`**. 
+
+```{r hypothesis_1_exp1_table, echo=FALSE}
+
+hypothesis1.exp1.inclusion
+
+knitr::kable(summary_stats,
+             caption = "Total reaction time in seconds")
+
+```
+
+### Experiment 2: memory
+
+```{r hypothesis_1_exp2,echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp2 |> 
+  filter(include_block == TRUE) |>
+  filter(motor_time_type %in% c("baseline", "time limited"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(motor_time_type) |> 
+  rename(`report context` = motor_time_type) |> 
+  summarise(M = mean(mean_total_RT, na.rm = TRUE),
+            SD = sd(mean_total_RT, na.rm = TRUE))
+
+# Bayesian model comparison
+hypothesis1.exp2.bf <- anovaBF(mean_total_RT ~ motor_time_type + subjID,
+                     whichRandom = "subjID",
+                     data = test_data,
+                     progress = FALSE,
+                     rscaleFixed = "wide",
+                     rscaleRandom = "nuisance",
+                     whichModels = "withmain",
+                     iterations = num_iterations)
+
+hypothesis1.exp2.inclusion <- bayesfactor_inclusion(hypothesis1.exp2.bf, match_models = TRUE)
+
+```
+
+In Experiment 2, the main effect of report context on mean total reaction time was **BF~10~ = `r round(exp(hypothesis1.exp2.inclusion$log_BF[2]),3)`**. 
+
+```{r hypothesis_1_exp2_table, echo=FALSE}
+
+hypothesis1.exp2.inclusion
+
+knitr::kable(summary_stats,
+             caption = "Total reaction time in seconds")
+
+```
+
+***
+
+# Hypothesis 2
+
+> Does report order affect metacognition independently of report time and motor confounds?
+
+Subsetting data to the baseline and time limited contexts, a main effect of report order on metacognitive efficiency will be observed, with null interaction between report order and report context. 
+
+### Experiment 1: perception
+
+```{r hypothesis_2_exp1, echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp1 |> 
+  filter(include_block == TRUE) |> 
+  filter(motor_time_type %in% c("baseline", "time limited"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(response_type) |> 
+  rename(`report order` = response_type) |> 
+  summarise(M = mean(efficiency, na.rm = TRUE),
+            SD = sd(efficiency, na.rm = TRUE))
+
+# Bayesian model comparison
+hypothesis234.exp1.bf <- anovaBF(efficiency ~ response_type * motor_time_type + subjID,
+                     whichRandom = "subjID",
+                     data = test_data,
+                     progress = FALSE,
+                     rscaleFixed = "wide",
+                     rscaleRandom = "nuisance",
+                     whichModels = "withmain",
+                     iterations = num_iterations)
+
+hypothesis234.exp1.inclusion <- bayesfactor_inclusion(hypothesis234.exp1.bf, match_models = TRUE)
+
+```
+
+In Experiment 1, the main effect of report order on metacognitive efficiency was **BF~10~ = `r round(exp(hypothesis234.exp1.inclusion$log_BF[2]),3)`**. The interaction between report order and report context was **BF~10~ = `r round(exp(hypothesis234.exp1.inclusion$log_BF[4]),3)`**.
+
+```{r hypothesis_2_exp1_table, echo=FALSE}
+
+hypothesis234.exp1.inclusion
+
+knitr::kable(summary_stats,
+             caption = "Metacognitive efficiency: meta-d'/d'")
+
+```
+
+### Experiment 2: memory
+
+```{r hypothesis_2_exp2,echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp2 |> 
+  filter(include_block == TRUE) |>
+  filter(motor_time_type %in% c("baseline", "time limited"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(response_type) |> 
+  rename(`report order` = response_type) |> 
+  summarise(M = mean(efficiency, na.rm = TRUE),
+            SD = sd(efficiency, na.rm = TRUE))
+
+# Bayesian model comparison
+hypothesis234.exp2.bf <- anovaBF(efficiency ~ response_type * motor_time_type + subjID,
+                     whichRandom = "subjID",
+                     data = test_data,
+                     progress = FALSE,
+                     rscaleFixed = "wide",
+                     rscaleRandom = "nuisance",
+                     whichModels = "withmain",
+                     iterations = num_iterations)
+
+hypothesis234.exp2.inclusion <- bayesfactor_inclusion(hypothesis234.exp2.bf, match_models = TRUE)
+
+```
+
+In Experiment 2, the main effect of report order on metacognitive efficiency was **BF~10~ = `r round(exp(hypothesis234.exp2.inclusion$log_BF[2]),3)`**. The interaction between report order and report context was **BF~10~ = `r round(exp(hypothesis234.exp2.inclusion$log_BF[4]),3)`**.
+
+```{r hypothesis_2_exp2_table, echo=FALSE}
+
+hypothesis234.exp2.inclusion
+
+knitr::kable(summary_stats,
+             caption = "Metacognitive efficiency: meta-d'/d'")
+
+```
+
+***
+
+# Hypothesis 3
+
+> Does report time affect metacognitive efficiency?
+
+Subsetting data to the baseline and time limited contexts, a main effect of report context will be observed. Metacognitive efficiency will be higher in the baseline than time limited context.
+
+### Experiment 1: perception
+
+```{r hypothesis_3_exp1, echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp1 |> 
+  filter(motor_time_type %in% c("baseline", "time limited"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(motor_time_type) |> 
+  rename(`report context` = motor_time_type) |> 
+  summarise(M = mean(efficiency, na.rm = TRUE),
+            SD = sd(efficiency, na.rm = TRUE))
+
+```
+
+In Experiment 1, the main effect of timing on metacognitive efficiency was **BF~10~ = `r round(exp(hypothesis234.exp1.inclusion$log_BF[3]),3)`**. 
+
+```{r hypothesis_3_exp1_table, echo=FALSE}
+
+knitr::kable(summary_stats,
+             caption = "Metacognitive efficiency: meta-d'/d'")
+
+```
+
+### Experiment 2: memory
+
+```{r hypothesis_3_exp2,echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp2 |> 
+  filter(motor_time_type %in% c("baseline", "time limited"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(motor_time_type) |> 
+  rename(`report context` = motor_time_type) |> 
+  summarise(M = mean(efficiency, na.rm = TRUE),
+            SD = sd(efficiency, na.rm = TRUE))
+
+```
+
+In Experiment 2, the main effect of report order on metacognitive efficiency was **BF~10~ = `r round(exp(hypothesis234.exp2.inclusion$log_BF[3]),3)`**. 
+
+```{r hypothesis_3_exp2_table, echo=FALSE}
+
+knitr::kable(summary_stats,
+             caption = "Metacognitive efficiency: meta-d'/d'")
+
+```
+
+***
+
+# Hypothesis 4
+
+> Do the effects of report order on metacognitive efficiency differ as a function of report time?
+
+Subsetting data to the baseline and time limited contexts, an interaction between report order and report context will be observed.
+
+### Experiment 1: perception
+
+```{r hypothesis_4_exp1, echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp1 |> 
+  # filter(include_block == TRUE) |> # Do not filter, it happens later
+  filter(motor_time_type %in% c("baseline", "time limited"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(motor_time_type,response_type) |> 
+  rename(`report context` = motor_time_type,
+         `report order` = response_type) |> 
+  summarise(M = mean(efficiency, na.rm = TRUE),
+            SD = sd(efficiency, na.rm = TRUE),
+            .groups = "keep")
+
+# Pairwise tests
+## Report order @ baseline ----
+hypothesis4.exp1.bfpaired.baseline <- numeric(3)
+
+baseline_data <- test_data |> filter(motor_time_type == "baseline")
+
+# calculate the bfs one by one enter them in vector    
+hypothesis4.exp1.bfpaired.baseline[1] <- pairwise_comparison(
+  baseline_data, response_labels[1], response_labels[2])
+  
+hypothesis4.exp1.bfpaired.baseline[2] <- pairwise_comparison(
+  baseline_data, response_labels[1], response_labels[3])
+
+hypothesis4.exp1.bfpaired.baseline[3] <- pairwise_comparison(
+  baseline_data, response_labels[2], response_labels[3])
+
+## Report order @ time limited ----
+hypothesis4.exp1.bfpaired.time_limited <- numeric(3)
+
+timed_data <- test_data |> filter(motor_time_type == "time limited")
+
+# calculate the bfs one by one enter them in vector
+hypothesis4.exp1.bfpaired.time_limited[1] <- pairwise_comparison(
+  timed_data, response_labels[1], response_labels[2])
+
+hypothesis4.exp1.bfpaired.time_limited[2] <- pairwise_comparison(
+  timed_data, response_labels[1], response_labels[3])
+
+hypothesis4.exp1.bfpaired.time_limited[3] <- pairwise_comparison(
+  timed_data, response_labels[2], response_labels[3])
+
+
+```
+
+In Experiment 1, the interaction between report order and report context on metacognitive efficiency was **BF~10~ = `r round(exp(hypothesis234.exp1.inclusion$log_BF[4]),3)`**.
+
+In the **baseline** context:
+
+- The pairwise effect between **`r response_labels[1]`** and **`r response_labels[2]`** was **BF~10~ = `r round(hypothesis4.exp1.bfpaired.baseline[1],3)`**
+- The pairwise effect between **`r response_labels[1]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis4.exp1.bfpaired.baseline[2],3)`**
+- The pairwise effect between **`r response_labels[2]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis4.exp1.bfpaired.baseline[3],3)`**
+
+In the **time limited** context:
+
+- The pairwise effect between **`r response_labels[1]`** and **`r response_labels[2]`** was **BF~10~ = `r round(hypothesis4.exp1.bfpaired.time_limited[1],3)`**
+- The pairwise effect between **`r response_labels[1]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis4.exp1.bfpaired.time_limited[2],3)`**
+- The pairwise effect between **`r response_labels[2]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis4.exp1.bfpaired.time_limited[3],3)`**
+
+```{r hypothesis_4_exp1_table, echo=FALSE}
+
+knitr::kable(summary_stats,
+             caption = "Metacognitive efficiency: meta-d'/d'")
+
+```
+
+### Experiment 2: memory
+
+```{r hypothesis_4_exp2,echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp2 |> 
+  # filter(include_block == TRUE) |> # Do not filter, it happens later
+  filter(motor_time_type %in% c("baseline", "time limited"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(motor_time_type,response_type) |> 
+  rename(`report context` = motor_time_type,
+         `report order` = response_type) |> 
+  summarise(M = mean(efficiency, na.rm = TRUE),
+            SD = sd(efficiency, na.rm = TRUE),
+            .groups = "keep")
+
+# Pairwise tests
+## Report order @ baseline ----
+hypothesis4.exp2.bfpaired.baseline <- numeric(3)
+
+baseline_data <- test_data |> filter(motor_time_type == "baseline")
+
+# calculate the bfs one by one enter them in vector    
+hypothesis4.exp2.bfpaired.baseline[1] <- pairwise_comparison(
+  baseline_data, response_labels[1], response_labels[2])
+  
+hypothesis4.exp2.bfpaired.baseline[2] <- pairwise_comparison(
+  baseline_data, response_labels[1], response_labels[3])
+
+hypothesis4.exp2.bfpaired.baseline[3] <- pairwise_comparison(
+  baseline_data, response_labels[2], response_labels[3])
+
+## Report order @ time limited ----
+hypothesis4.exp2.bfpaired.time_limited <- numeric(3)
+
+timed_data <- test_data |> filter(motor_time_type == "time limited")
+
+# calculate the bfs one by one enter them in vector
+hypothesis4.exp2.bfpaired.time_limited[1] <- pairwise_comparison(
+  timed_data, response_labels[1], response_labels[2])
+
+hypothesis4.exp2.bfpaired.time_limited[2] <- pairwise_comparison(
+  timed_data, response_labels[1], response_labels[3])
+
+hypothesis4.exp2.bfpaired.time_limited[3] <- pairwise_comparison(
+  timed_data, response_labels[2], response_labels[3])
+
+```
+
+In Experiment 2, the interaction between report order and report context on metacognitive efficiency was **BF~10~ = `r round(exp(hypothesis234.exp2.inclusion$log_BF[4]),3)`**.
+
+In the **baseline** context:
+
+- The pairwise effect between **`r response_labels[1]`** and **`r response_labels[2]`** was **BF~10~ = `r round(hypothesis4.exp2.bfpaired.baseline[1],3)`**
+- The pairwise effect between **`r response_labels[1]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis4.exp2.bfpaired.baseline[2],3)`**
+- The pairwise effect between **`r response_labels[2]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis4.exp2.bfpaired.baseline[3],3)`**
+
+In the **time limited** context:
+
+- The pairwise effect between **`r response_labels[1]`** and **`r response_labels[2]`** was **BF~10~ = `r round(hypothesis4.exp2.bfpaired.time_limited[1],3)`**
+- The pairwise effect between **`r response_labels[1]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis4.exp2.bfpaired.time_limited[2],3)`**
+- The pairwise effect between **`r response_labels[2]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis4.exp2.bfpaired.time_limited[3],3)`**
+
+```{r hypothesis_4_exp2_table, echo=FALSE}
+
+knitr::kable(summary_stats,
+             caption = "Metacognitive efficiency: meta-d'/d'")
+
+```
+
+***
+
+# Hypothesis 5
+
+> Do the effects of report order on metacognitive efficiency differ as a function of motor preparation?
+
+Subsetting data to the baseline and fixed motor contexts, an interaction between report order and report context will be observed. 
+
+### Experiment 1: perception
+
+```{r hypothesis_5_exp1, echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp1 |> 
+  filter(include_block == TRUE) |> 
+  filter(motor_time_type %in% c("baseline", "motor fixed"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(motor_time_type,response_type) |> 
+  rename(`report context` = motor_time_type,
+         `report order` = response_type) |> 
+  summarise(M = mean(efficiency, na.rm = TRUE),
+            SD = sd(efficiency, na.rm = TRUE),
+            .groups = "keep")
+
+# Bayesian model comparison
+hypothesis5.exp1.bf <- anovaBF(efficiency ~ response_type * motor_time_type + subjID,
+                     whichRandom = "subjID",
+                     data = test_data,
+                     progress = FALSE,
+                     rscaleFixed = "wide",
+                     rscaleRandom = "nuisance",
+                     whichModels = "withmain",
+                     iterations = num_iterations)
+
+hypothesis5.exp1.inclusion <- bayesfactor_inclusion(hypothesis5.exp1.bf, match_models = TRUE)
+
+```
+
+In Experiment 1, the interaction between report order and report context was **BF~10~ = `r round(exp(hypothesis5.exp1.inclusion$log_BF[4]),3)`**.
+
+```{r hypothesis_5_exp1_table, echo=FALSE}
+
+hypothesis5.exp1.inclusion
+
+knitr::kable(summary_stats,
+             caption = "Metacognitive efficiency: meta-d'/d'")
+
+```
+
+### Experiment 2: memory
+
+```{r hypothesis_5_exp2,echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp2 |> 
+  filter(include_block == TRUE) |> 
+  filter(motor_time_type %in% c("baseline", "motor fixed"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(motor_time_type,response_type) |> 
+  rename(`report context` = motor_time_type,
+         `report order` = response_type) |> 
+  summarise(M = mean(efficiency, na.rm = TRUE),
+            SD = sd(efficiency, na.rm = TRUE),
+            .groups = "keep")
+
+# Bayesian model comparison
+hypothesis5.exp2.bf <- anovaBF(efficiency ~ response_type * motor_time_type + subjID,
+                     whichRandom = "subjID",
+                     data = test_data,
+                     progress = FALSE,
+                     rscaleFixed = "wide",
+                     rscaleRandom = "nuisance",
+                     whichModels = "withmain",
+                     iterations = num_iterations)
+
+hypothesis5.exp2.inclusion <- bayesfactor_inclusion(hypothesis5.exp2.bf, match_models = TRUE)
+
+```
+
+In Experiment 2, the interaction between report order and report context was **BF~10~ = `r round(exp(hypothesis5.exp2.inclusion$log_BF[4]),3)`**.
+
+```{r hypothesis_5_exp2_table, echo=FALSE}
+
+hypothesis5.exp2.inclusion
+
+knitr::kable(summary_stats,
+             caption = "Metacognitive efficiency: meta-d'/d'")
+
+```
+
+***
+
+# Hypothesis 6
+
+> Does preparing a task decision before confidence rating improve metacognition?
+
+Subsetting data to the fixed motor context, a main effect of report order will be observed. Pairwise contrasts will reveal that metacognitive efficiency is higher in the D→C condition than the C→D condition.
+
+### Experiment 1: perception
+
+```{r hypothesis_6_exp1, echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp1 |> 
+  filter(include_block==TRUE) |> 
+  filter(motor_time_type %in% c("motor fixed"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(response_type) |> 
+  rename(`report order` = response_type) |> 
+  summarise(M = mean(efficiency, na.rm = TRUE),
+            SD = sd(efficiency, na.rm = TRUE),
+            .groups = "keep")
+
+# Bayesian model comparison
+hypothesis6.exp1.bf <- anovaBF(efficiency ~ response_type + subjID,
+                     whichRandom = "subjID",
+                     data = test_data,
+                     progress = FALSE,
+                     rscaleFixed = "wide",
+                     rscaleRandom = "nuisance",
+                     whichModels = "withmain",
+                     iterations = num_iterations)
+
+hypothesis6.exp1.inclusion <- bayesfactor_inclusion(hypothesis6.exp1.bf, match_models = TRUE)
+
+# Pairwise tests
+## Report order @ motor fixed context ----
+test_data <- group_data.exp1 |> 
+  filter(motor_time_type %in% c("motor fixed"))
+
+hypothesis6.exp1.bfpaired.fixed <- numeric(3)
+
+# calculate the bfs one by one enter them in vector
+hypothesis6.exp1.bfpaired.fixed[1] <- pairwise_comparison(
+  test_data, response_labels[1], response_labels[2])
+
+hypothesis6.exp1.bfpaired.fixed[2] <- pairwise_comparison(
+  test_data, response_labels[1], response_labels[3])
+
+hypothesis6.exp1.bfpaired.fixed[3] <- pairwise_comparison(
+  test_data, response_labels[2], response_labels[3])
+
+# Directional hypothesis
+# Filter subjects with efficiency=NA in either or both reports
+filtered_data <- test_data |> 
+  filter(response_type %in% c("D→C", "C→D")) |> 
+  group_by(subjID) |> 
+  filter(!any(is.na(efficiency))) |> 
+  tidyr::pivot_wider(id_cols = subjID, names_from = response_type, values_from = efficiency)
+
+# Run the comparison
+directional_result <- ttestBF(
+  x = filtered_data[["D→C"]],
+  y = filtered_data[["C→D"]],
+  paired = TRUE, rscale = "medium", nullInterval = c(0,Inf))
+hypothesis6.exp1.directional <- extractBF(directional_result)[1,"bf"]  
+
+
+```
+
+In Experiment 1, the main effect of report order on metacognitive efficiency in the fixed motor context was **BF~10~ = `r round(exp(hypothesis6.exp1.inclusion$log_BF[2]),3)`**. 
+
+Notably, the directional pairwise effect between **`r response_labels[1]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis6.exp1.directional,3)`**.
+
+The non-directional pairwise effect between **`r response_labels[1]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis6.exp1.bfpaired.fixed[2],3)`**.
+
+Additionally:
+
+- The pairwise effect between **`r response_labels[1]`** and **`r response_labels[2]`** was **BF~10~ = `r round(hypothesis6.exp1.bfpaired.fixed[1],3)`**
+- The pairwise effect between **`r response_labels[2]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis6.exp1.bfpaired.fixed[3],3)`**
+
+```{r hypothesis_6_exp1_table, echo=FALSE}
+
+knitr::kable(summary_stats,
+             caption = "Metacognitive efficiency: meta-d'/d'")
+
+```
+
+### Experiment 2: memory
+
+```{r hypothesis_6_exp2,echo=FALSE}
+
+# Subset to conditions of interest
+test_data <- group_data.exp2 |> 
+  filter(include_block==TRUE) |>
+  filter(motor_time_type %in% c("motor fixed"))
+
+# Compute means and SDs
+summary_stats <- test_data |> 
+  group_by(response_type) |> 
+  rename(`report order` = response_type) |> 
+  summarise(M = mean(efficiency, na.rm = TRUE),
+            SD = sd(efficiency, na.rm = TRUE),
+            .groups = "keep")
+
+# Bayesian model comparison
+hypothesis6.exp2.bf <- anovaBF(efficiency ~ response_type + subjID,
+                     whichRandom = "subjID",
+                     data = test_data,
+                     progress = FALSE,
+                     rscaleFixed = "wide",
+                     rscaleRandom = "nuisance",
+                     whichModels = "withmain",
+                     iterations = num_iterations)
+
+hypothesis6.exp2.inclusion <- bayesfactor_inclusion(hypothesis6.exp2.bf, match_models = TRUE)
+
+# Pairwise tests
+## Report order @ motor fixed context ----
+test_data <- group_data.exp2 |> 
+  filter(motor_time_type %in% c("motor fixed"))
+
+hypothesis6.exp2.bfpaired.fixed <- numeric(3)
+
+# calculate the bfs one by one enter them in vector
+hypothesis6.exp2.bfpaired.fixed[1] <- pairwise_comparison(
+  test_data, response_labels[1], response_labels[2])
+
+hypothesis6.exp2.bfpaired.fixed[2] <- pairwise_comparison(
+  test_data, response_labels[1], response_labels[3])
+
+hypothesis6.exp2.bfpaired.fixed[3] <- pairwise_comparison(
+  test_data, response_labels[2], response_labels[3])
+
+# Directional hypothesis
+# Filter subjects with efficiency=NA in either or both reports
+filtered_data <- test_data |> 
+  filter(response_type %in% c("D→C", "C→D")) |> 
+  group_by(subjID) |> 
+  filter(!any(is.na(efficiency))) |> 
+  tidyr::pivot_wider(id_cols = subjID, names_from = response_type, values_from = efficiency)
+
+# Run the comparison
+directional_result <- ttestBF(
+  x = filtered_data[["D→C"]],
+  y = filtered_data[["C→D"]],
+  paired = TRUE, rscale = "medium", nullInterval = c(0,Inf))
+hypothesis6.exp2.directional <- extractBF(directional_result)[1,"bf"]  
+
+```
+
+In Experiment 2, the main effect of report order on metacognitive efficiency in the fixed motor context was **BF~10~ = `r round(exp(hypothesis6.exp2.inclusion$log_BF[2]),3)`**. 
+
+Notably, the directional pairwise effect between **`r response_labels[1]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis6.exp2.directional,3)`**.
+
+The non-directional pairwise effect between **`r response_labels[1]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis6.exp2.bfpaired.fixed[2],3)`**.
+
+Additionally:
+
+- The pairwise effect between **`r response_labels[1]`** and **`r response_labels[2]`** was **BF~10~ = `r round(hypothesis6.exp2.bfpaired.fixed[1],3)`**
+- The pairwise effect between **`r response_labels[2]`** and **`r response_labels[3]`** was **BF~10~ = `r round(hypothesis6.exp2.bfpaired.fixed[3],3)`**
+
+```{r hypothesis_6_exp2_table, echo=FALSE}
+
+knitr::kable(summary_stats,
+             caption = "Metacognitive efficiency: meta-d'/d'")
+
+```
+
+***
+
+# Hypothesis 7
+
+> Do the effects of report order and report context on metacognitive efficiency (i.e., hypotheses 2 through 6) differ between perception and memory domains?
+
+Including data from Experiment 1 and Experiment 2, an interaction will be observed between report order, report context, and task domain.
+
+```{r hypothesis_7, echo=FALSE}
+
+# Concatenate data
+test_data <- rbind(group_data.exp1, group_data.exp2)
+
+test_data <- test_data |> 
+  filter(include_block == TRUE)
+
+# Bayesian model comparison
+hypothesis7.bf <- anovaBF(efficiency ~ response_type * motor_time_type * domain_type + subjID,
+                     whichRandom = "subjID",
+                     data = test_data,
+                     progress = FALSE,
+                     rscaleFixed = "wide",
+                     rscaleRandom = "nuisance",
+                     whichModels = "withmain",
+                     iterations = num_iterations/5)
+
+hypothesis7.inclusion <- bayesfactor_inclusion(hypothesis7.bf, match_models = TRUE)
+
+```
+
+The 3-way interaction between report order, report context, and domain type was **BF~10~ = `r round(exp(hypothesis7.inclusion$log_BF[8]),3)`**.
+
+Additionally:
+
+- The 2-way interaction between **domain** and **report order** was **BF~10~ = `r round(exp(hypothesis7.inclusion$log_BF[4]),3)`**
+- The 2-way interaction between **domain** and **report context** was **BF~10~ = `r round(exp(hypothesis7.inclusion$log_BF[6]),3)`**
+
+```{r hypothesis_7_summary, echo=FALSE}
+
+hypothesis7.inclusion
+
+# Summarise data
+
+summary_stats_within <- test_data |>
+  Rmisc::summarySEwithin(
+    measurevar = "efficiency",
+    idvar = "subjID",
+    betweenvars = "domain_type",
+    withinvars = c("motor_time_type","response_type"),
+    na.rm = TRUE
+  )
+
+summary_stats_between <- test_data |>
+  Rmisc::summarySE(
+    measurevar = "efficiency",
+    groupvars = c("domain_type","motor_time_type","response_type"),
+    na.rm = TRUE
+  )
+
+summary_stats <- summary_stats_between
+summary_stats$se <- summary_stats_within$se
+summary_stats$ci <- summary_stats_within$ci
+
+# Plot it
+
+ggplot(summary_stats, aes(x = response_type, y = efficiency, colour = motor_time_type)) +
+  # facet_grid(motor_time_type ~ domain_type) +
+  facet_grid(. ~ motor_time_type) +
+  geom_hline(yintercept = 1, colour = "grey92") +
+  geom_line(aes(group = interaction(domain_type,motor_time_type)), 
+            linewidth = 2, alpha = 0.25, 
+            show.legend = FALSE) +
+  geom_errorbar(aes(ymin = efficiency - se, ymax = efficiency + se), 
+                width = 0, linewidth = 2, 
+                show.legend = FALSE) +
+  geom_point(aes(shape = domain_type), 
+             size = 2, colour = "black", fill = "white") +
+  scale_colour_manual(values = c("black","#93cfc8","#fbab88")) +
+  scale_fill_manual(values = c("black","#93cfc8","#fbab88")) +
+  scale_shape_manual(values = c(21,24)) +
+  labs(colour = "",
+       x = "report order",
+       y = "m-ratio") +
+  theme_julian() +
+  theme(axis.text = element_text(size = 8))
+
+```
+
