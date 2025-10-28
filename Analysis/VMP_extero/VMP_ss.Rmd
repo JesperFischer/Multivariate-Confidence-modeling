@@ -1,0 +1,156 @@
+---
+title: "Decender2020"
+output: html_document
+date: "2025-10-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(tidyverse,posterior,tidybayes,cmdstanr, furrr,ordbetareg, future.apply, patchwork,purrr, bayesplot)
+
+
+invisible(
+  lapply(
+    list.files(here::here("Analysis", "Functions"), pattern = "\\.[Rr]$", full.names = TRUE),
+    source
+  )
+)
+```
+
+## R Markdown
+
+# Preprocesing
+
+```{r}
+df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>% 
+    mutate(DecisionRT = as.numeric(DecisionRT),
+           ConfidenceRT = as.numeric(ConfidenceRT),
+         Confidence = as.numeric(Confidence),
+         ResponseCorrect = as.numeric(ifelse(ResponseCorrect == "1",1,
+                                             ifelse(ResponseCorrect == "1.0",1,
+                                                    ifelse(ResponseCorrect == "True",1,
+                                                           ifelse(ResponseCorrect == "0",0,
+                                                                  ifelse(ResponseCorrect == "0.0",0,
+                                                                         ifelse(ResponseCorrect == "False",0,NA))))))),
+         Decision = ifelse(Decision == "More",1,ifelse(Decision == "Less",0,NA))) %>% 
+  mutate(participant_id = as.numeric(as.factor(participant_id))) %>%
+  filter(Modality == "Extero",
+         session == 1) %>% 
+  filter(DecisionRT < 8 & DecisionRT > 0.1)%>% 
+  select(ResponseCorrect,participant_id,DecisionRT,Decision, Confidence, ConfidenceRT, Alpha,cohort)  %>% drop_na() %>% 
+  rename(
+    Confidence = Confidence,
+    X  = Alpha,
+    Y = ResponseCorrect,
+    RT = DecisionRT,
+    subject = participant_id
+  ) %>% 
+  mutate(Correct = Y,
+         X = abs(X),
+         Confidence = Confidence/100)
+
+```
+
+# bad subjects
+```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
+remover(df %>% filter(cohort == "vmp1"))
+removers_vmp1 = c("16")
+```
+
+
+```{r}
+
+df = df %>% filter(!subject %in% c("16"))
+library(dplyr)
+library(cmdstanr)
+library(here)
+library(furrr)
+library(purrr)
+
+# Set up parallel plan (adjust number of workers as needed)
+plan(multisession, workers = 4)
+
+# Precompile model outside the loop — avoids recompiling for each subject
+mod <- cmdstanr::cmdstan_model(here::here("Stanmodels", "ss", "ACCSS_Correct.stan"))
+
+# Define the per-subject fitting function
+fit_subject <- function(s, df, mod) {
+  df1 <- df %>% filter(subject == s)
+  
+  datastan <- list(
+    N = nrow(df1),
+    binom_y = df1$Y,
+    RT = df1$RT,
+    X = df1$X,
+    ACC = df1$Correct,
+    Conf = df1$Confidence,
+    minRT = min(df1$RT)
+  )
+  
+  cor <- mod$sample(
+    data = datastan,
+    refresh = 0,
+    iter_sampling = 500,
+    iter_warmup = 500,
+    adapt_delta = 0.95,
+    max_treedepth = 12,
+    init = 0,
+    parallel_chains = 4
+  )
+  
+  loglik <- cor$loo()
+  loglik_bin <- cor$loo("log_lik_bin")
+  loglik_rt <- cor$loo("log_lik_rt")
+  loglik_conf <- cor$loo("log_lik_conf")
+  
+  params <- cor$summary(c("gm", "rho_p_rt", "rho_p_conf", "rho_rt_conf")) %>%
+    mutate(subject = s)
+  
+  list(params = params,
+       loglik = loglik,
+       loglik_bin = loglik_bin,
+       loglik_rt = loglik_rt,
+       loglik_conf = loglik_conf)
+}
+
+# Run in parallel over subjects
+results <- future_map(unique(df$subject), ~fit_subject(.x, df, mod), .progress = TRUE)
+
+# Optionally combine the parameter tables
+params_all <- map_dfr(results, "params")
+```
+
+
+```{r}
+mod1 = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","SS_ent_compar.stan"))
+
+datastan = list(N = nrow(df1),
+                binom_y = df1$Correct,
+                RT = df1$RT,
+                X = abs(df1$X),
+                ACC = df1$Correct,
+                Conf = df1$Confidence,
+                minRT = min(df1$RT)
+              )
+ent <-mod1$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 500,
+  iter_warmup = 500,
+  adapt_delta = 0.95,
+  max_treedepth = 12,
+  init  = 0,
+  parallel_chains = 4)
+
+
+
+
+
+
+
+
+```
+
+
+
