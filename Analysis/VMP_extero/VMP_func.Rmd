@@ -7,7 +7,7 @@ date: "2025-10-13"
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-pacman::p_load(tidyverse,posterior,tidybayes,cmdstanr, furrr,futuremap,ordbetareg, future.apply, patchwork,purrr)
+pacman::p_load(tidyverse,posterior,tidybayes,cmdstanr, furrr,ordbetareg, future.apply, patchwork,purrr, bayesplot)
 
 
 invisible(
@@ -53,6 +53,7 @@ df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>%
 ```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
 remover(df %>% filter(cohort == "vmp1"))
 removers_vmp1 = c("16")
+
 
 ```
 
@@ -143,6 +144,8 @@ plot_diagnostics(full)
 ```{r}
 pred_pure = Get_predictive(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 10, model = "pure")
 
+pred_med = Get_predictive(med,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 10, model = "med")
+
 pred_full = Get_predictive(full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 10, model = "full")
 ```
 
@@ -157,6 +160,14 @@ bin_pure = Plot_bin(pred_pure,df %>% filter(cohort == "vmp1"& !subject %in% remo
 bin_pure[[1]]+ggtitle("pure")
 bin_pure[[2]]+ggtitle("pure")
 
+
+bin_med = Plot_bin(pred_med,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), ACC = F)
+
+bin_med[[1]]+ggtitle("pure")
+bin_med[[2]]+ggtitle("pure")
+
+
+
 bin_full = Plot_bin(pred_full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), ACC = F)
 bin_full[[1]]+ggtitle("full")
 bin_full[[2]]+ggtitle("full")
@@ -170,6 +181,13 @@ rt_pure = Plot_RT(pred_pure,df %>% filter(cohort == "vmp1"& !subject %in% remove
 rt_pure[[1]]+ggtitle("pure")
 rt_pure[[2]]+ggtitle("pure")
 rt_pure[[3]]+ggtitle("pure")
+
+
+
+rt_med = Plot_RT(pred_med,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), bin = 7)
+rt_med[[1]]+ggtitle("med")
+rt_med[[2]]+ggtitle("med")
+rt_med[[3]]+ggtitle("med")
 
 
 
@@ -191,6 +209,11 @@ conf_pure[[1]]+ggtitle("pure")
 conf_pure[[2]]+ggtitle("pure")
 
 
+conf_med = Plot_conf(pred_med,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), bin = 7)
+conf_med[[1]]+ggtitle("med")
+conf_med[[2]]+ggtitle("med")
+
+
 
 
 conf_full = Plot_conf(pred_full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), bin = 7)
@@ -208,6 +231,8 @@ pred_pure_group_new_sub = Get_predictive_new_subject(pure,df %>% filter(cohort =
 # pred_pure_group_subject = Get_predictive_subject_average(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "pure")
 # pred_pure_group_subject_resp = Get_predictive_subject_average_responses(pure,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "pure")
 
+pred_med_group = Get_predictive_group(med,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "med")
+pred_med_group_new_sub = Get_predictive_new_subject(med,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "med")
 
 
 pred_full_group = Get_predictive_group(full,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1), n_draws = 2000, model = "full")
@@ -219,6 +244,17 @@ pred_full_group_new_sub = Get_predictive_new_subject(full,df %>% filter(cohort =
 group_predictive(pred_pure_group,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
   labs(
     title = expression(paste("(PURE) Population mean predictions: E[Y | X, ", mu[theta], "], Uncertainty = Var(",mu[theta],")")),
+    subtitle = "Expected response for the population; Where is the mean?",
+    caption = "Model predictions for the expected population mean response. 
+    Lines ([95 , 90 , 80]% CI) show the posterior mean of the expected value,
+    reflecting uncertainty in the group-level parameters."
+  )
+
+
+
+group_predictive(pred_med_group,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
+  labs(
+    title = expression(paste("(MED) Population mean predictions: E[Y | X, ", mu[theta], "], Uncertainty = Var(",mu[theta],")")),
     subtitle = "Expected response for the population; Where is the mean?",
     caption = "Model predictions for the expected population mean response. 
     Lines ([95 , 90 , 80]% CI) show the posterior mean of the expected value,
@@ -238,12 +274,28 @@ group_predictive(pred_full_group,df %>% filter(cohort == "vmp1"& !subject %in% r
 ```
 
 
-```{r}
+```{r, fig.width= 12, fig.height=7, message=FALSE,warning=FALSE}
+
 
 group_predictive(pred_full_group_new_sub,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
   labs(
     title = expression(paste(
       "(FULL) New subject predictions: ", 
+      "E[Y | X, ", theta[s], "] where ", 
+      theta[s], " ~ MVN(", mu[theta], ", ", Sigma, ")"
+    )),
+    subtitle = "Expected response for hypothetical subjects from the population; Where are individuals",
+    caption = "Credibility intervals reflect two sources of uncertainty:
+(1) Parameter uncertainty: Var(μ_θ, Σ), from posterior draws
+(2) Population heterogeneity: Var(θ_s | μ_θ, Σ) - from sampling new subjects."
+  )
+
+
+
+group_predictive(pred_med_group_new_sub,df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1))+
+  labs(
+    title = expression(paste(
+      "(MED) New subject predictions: ", 
       "E[Y | X, ", theta[s], "] where ", 
       theta[s], " ~ MVN(", mu[theta], ", ", Sigma, ")"
     )),
