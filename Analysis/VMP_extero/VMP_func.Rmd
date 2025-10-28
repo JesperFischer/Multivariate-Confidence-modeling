@@ -117,6 +117,8 @@ fits <- future_map(names(models), ~ {
 names(fits) <- names(models)
 
 fit00 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1),ACC = F, "VMP1_pure_correct",modeltype = "pure",conf = "ord_beta")
+
+
 fit1 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1),ACC = F, "VMP1_metaun",modeltype = "meta_un",conf = "ord_beta")
 fit2 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1),ACC = F, "VMP1_metaun_rtun",modeltype = "meta_un_rt_un",conf = "ord_beta")
 
