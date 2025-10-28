@@ -199,7 +199,7 @@ data {
 
 }
 transformed data{
-  int P = 8;
+  int P = 9;
 }
 
 parameters {

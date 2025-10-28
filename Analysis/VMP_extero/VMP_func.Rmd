@@ -95,7 +95,7 @@ plots
 
 ```{r}
 
-df = df %>% filter(subject < 10)
+df = df %>% filter(subject < 30)
 models <- c("pure", "meta_un", "meta_un_rt_un")
 names(models) <- c("VMP1_pure", "VMP1_metaun", "VMP1_metaun_rtun")
 
@@ -116,7 +116,7 @@ fits <- future_map(names(models), ~ {
 # Assign the results to named variables
 names(fits) <- names(models)
 
-fit0 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1),ACC = F, "VMP1_pure",modeltype = "pure",conf = "ord_beta")
+fit00 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1),ACC = F, "VMP1_pure_correct",modeltype = "pure",conf = "ord_beta")
 fit1 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1),ACC = F, "VMP1_metaun",modeltype = "meta_un",conf = "ord_beta")
 fit2 = fit_data_copula_rt(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1),ACC = F, "VMP1_metaun_rtun",modeltype = "meta_un_rt_un",conf = "ord_beta")
 

@@ -100,6 +100,10 @@ check_modeltype = function(ACC,modeltype,conf,VMP){
 
   }else if(modeltype == "pure" & ACC == F & conf == "ord_beta" & VMP == T){
     mod = cmdstan_model(here::here("Stanmodels","small VMP","VMP_Resp_Bin_RT_Contin_Conf_small.stan"))
+    # mod = cmdstan_model(here::here("Stanmodels","small VMP","VMP_Resp_Bin_RT_Contin_Conf_small_optimized.stan"))
+    mod = cmdstan_model(here::here("Stanmodels","ss","SS_Pure_conf_hier.stan"))
+
+
 
   }else if(modeltype == "meta_un" & ACC == F & conf == "ord_beta" & VMP == T){
     mod = cmdstan_model(here::here("Stanmodels","small VMP","VMP_Resp_Bin_RT_Contin_Conf_small_metaun.stan"))
