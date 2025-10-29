@@ -54,7 +54,6 @@ df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>%
 remover(df %>% filter(cohort == "vmp1"))
 removers_vmp1 = c("16")
 
-
 ```
 
 
@@ -67,10 +66,21 @@ removers_vmp2 = c("227","263","275","298","300","326","397","495","546")
 ```
 
 
-```{r, fig.height=7,fig.width=10}
+```{r, fig.height=8,fig.width=10}
 (Group_plot(df %>% filter(cohort == "vmp1" & !subject %in% removers_vmp1))+ggtitle("Cohort1") | 
    Group_plot(df %>% filter(cohort == "vmp2"& !subject %in% removers_vmp2))+ggtitle("Cohort2"))+
   plot_layout(guides = "collect")&theme(legend.position = "top")
+
+
+
+
+df %>% 
+  mutate(absX = abs(X)) %>% 
+  group_by(absX, Y) %>% 
+  summarize(mean = mean(Correct)) %>% 
+  ggplot(aes(x = absX, y = mean, col = as.factor(Y)))+geom_point()
+
+
 ```
 
 

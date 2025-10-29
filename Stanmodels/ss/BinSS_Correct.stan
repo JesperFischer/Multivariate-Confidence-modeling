@@ -57,7 +57,7 @@ functions {
 
 
     for (n in 1:N) {
-      real theta = psycho_ACC(X[n], alpha , beta , lapse );
+      real theta = get_prob_cor(psycho_ACC(X[n], alpha , beta , lapse), X[n]);
       if (is_upper == 0) {
         u_bounds[n, 1] = binom_y[n] == 0.0
                           ? 0.0 : binomial_cdf(binom_y[n] - 1 | 1, theta);
@@ -159,8 +159,17 @@ functions {
   }else{
     return(0);
   }
-
+}
+  real get_prob_cor(real theta, real x){
+  if(x > 0){
+    return(theta);
+  }else if(x < 0){
+    return(1-theta);
+  }else{
+    return(0);
   }
+
+}
 }
 
 
@@ -214,12 +223,11 @@ transformed parameters{
   real rt_int = gm[4];
   real rt_slope = gm[5];
   real rt_prec = exp(gm[6]);
-  real rt_stim = gm[7];
 
 
-  real conf_prec = exp(gm[8]);
-  real meta_un = gm[9];
-
+  real conf_prec = exp(gm[7]);
+  real meta_un = gm[8];
+  real meta_bias = gm[9];
 
 
   vector[N] entropy_t;
@@ -244,24 +252,29 @@ model {
   gm[1] ~ normal(0,10); //global mean of beta
   gm[2] ~ normal(-2,3); //global mean of beta
   gm[3] ~ normal(-4,2); //global mean of beta
-  gm[4:9] ~ normal(0,5); //global mean of beta
+  gm[4:7] ~ normal(0,5); //global mean of beta
+  gm[8] ~ normal(0,1); //global mean of beta
+  gm[9] ~ normal(0,2); //global mean of beta
 
 
   rt_ndt ~ normal(0.3,0.05);
 
 
 
+  rt_ndt ~ normal(0.3,0.05);
+
+
   matrix[N, 3] u_mix;
   for (n in 1:N) {
     u_mix[n, 1] = u[n,1];
 
-    u_mix[n, 2] = lognormal_cdf(RT[n] - rt_ndt | rt_int + rt_slope * entropy_t[n] + rt_stim * X[n], rt_prec);
+    u_mix[n, 2] = lognormal_cdf(RT[n] - rt_ndt | rt_int + rt_slope * entropy_t[n], rt_prec);
 
-    u_mix[n, 3] = ord_beta_reg_cdf(Conf[n] | logit(conf_mu[n]), conf_prec, c0, c11);
+    u_mix[n, 3] = ord_beta_reg_cdf(Conf[n] | logit(conf_mu[n]) + meta_bias, conf_prec, c0, c11);
 
-    target += lognormal_lpdf(RT[n] - rt_ndt | rt_int + rt_slope * entropy_t[n]+ rt_stim * X[n], rt_prec);
+    target += lognormal_lpdf(RT[n] - rt_ndt | rt_int + rt_slope * entropy_t[n], rt_prec);
 
-    target += ord_beta_reg_lpdf(Conf[n] | logit(conf_mu[n]), conf_prec, c0, c11);
+    target += ord_beta_reg_lpdf(Conf[n] | logit(conf_mu[n]) + meta_bias, conf_prec, c0, c11);
 
     // target += binomial_lpmf(binom_y[n] | 1, theta[n]);
 
@@ -294,9 +307,9 @@ generated quantities {
   for (n in 1:N) {
     u_mixx[n, 1] = u[n,1];
 
-    u_mixx[n, 2] = lognormal_cdf(RT[n] - rt_ndt | rt_int + rt_slope * entropy_t[n] + rt_stim * X[n], rt_prec);
+    u_mixx[n, 2] = lognormal_cdf(RT[n] - rt_ndt | rt_int + rt_slope * entropy_t[n], rt_prec);
 
-    u_mixx[n, 3] = ord_beta_reg_cdf(Conf[n] | logit(conf_mu[n]), conf_prec, c0, c11);
+    u_mixx[n, 3] = ord_beta_reg_cdf(Conf[n] | logit(conf_mu[n]) + meta_bias, conf_prec, c0, c11);
   }
 
   vector[N] log_lik_cop;
@@ -312,9 +325,9 @@ generated quantities {
 
 
   for(n in 1:N){
-    log_lik_bin[n] = binomial_lpmf(binom_y[n] | 1, theta[n]);
-    log_lik_rt[n] = lognormal_lpdf(RT[n] - rt_ndt | rt_int + rt_slope * entropy_t[n]+ rt_stim * X[n], rt_prec);
-    log_lik_conf[n] = ord_beta_reg_lpdf(Conf[n] | logit(conf_mu[n]), conf_prec, c0, c11);
+    log_lik_bin[n] = binomial_lpmf(binom_y[n] | 1, get_prob_cor(theta[n], X[n]));
+    log_lik_rt[n] = lognormal_lpdf(RT[n] - rt_ndt | rt_int + rt_slope * entropy_t[n], rt_prec);
+    log_lik_conf[n] = ord_beta_reg_lpdf(Conf[n] | logit(conf_mu[n]) + meta_bias, conf_prec, c0, c11);
     log_lik[n] = log_lik_bin[n] + log_lik_rt[n] + log_lik_conf[n] + log_lik_cop[n];
   }
 

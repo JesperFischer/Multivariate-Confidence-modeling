@@ -43,11 +43,11 @@ df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>%
     Confidence = Confidence,
     X  = Alpha,
     Y = ResponseCorrect,
+    resp = Decision,
     RT = DecisionRT,
     subject = participant_id
   ) %>% 
   mutate(Correct = Y,
-         X = abs(X),
          Confidence = Confidence/100)
 
 ```
@@ -69,7 +69,7 @@ plots
 
 ```{r, fig.height=7,fig.width=12}
 
-df = df %>% filter(!subject %in% c("16") & subject < 30)
+df = df %>% filter(!subject %in% c("16") & subject < 50)
 library(dplyr)
 library(cmdstanr)
 library(here)
@@ -77,10 +77,11 @@ library(furrr)
 library(purrr)
 
 # Set up parallel plan (adjust number of workers as needed)
-plan(multisession, workers = 10)
+plan(multisession, workers = 2)
 
 # Precompile model outside the loop — avoids recompiling for each subject
-mod <- cmdstanr::cmdstan_model(here::here("Stanmodels", "ss", "ACCSS_Correct.stan"))
+# mod <- cmdstanr::cmdstan_model(here::here("Stanmodels", "ss", "ACCSS_Correct.stan"))
+mod <- cmdstanr::cmdstan_model(here::here("Stanmodels", "ss", "BINSS_Correct.stan"))
 
 # Define the per-subject fitting function
 fit_subject <- function(s, df, mod) {
@@ -106,7 +107,7 @@ fit_subject <- function(s, df, mod) {
     init = 0,
     parallel_chains = 4
   )
-  mcmc_pairs(cor$draws(c("rho_p_rt","rho_rt_conf","rho_p_conf","gm")), np = nuts_params(cor))
+  # mcmc_pairs(cor$draws(c("rho_p_rt","rho_rt_conf","rho_p_conf","gm")), np = nuts_params(cor))
   loglik <- cor$loo()
   loglik_bin <- cor$loo("log_lik_bin")
   loglik_rt <- cor$loo("log_lik_rt")
