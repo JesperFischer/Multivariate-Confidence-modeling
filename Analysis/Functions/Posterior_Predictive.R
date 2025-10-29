@@ -460,7 +460,7 @@ Plot_conf = function(predictions,df, bin = 7){
   df$subject = as.numeric(as.factor(df$subject))
 
   Marginal = predictions %>%
-    pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
+    # pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
     ggplot() +
     geom_histogram(data = df %>% mutate(draw = NA)%>% mutate(Correct = ifelse(Correct == 1, "Correct","Incorrect")),
                    aes(x = Confidence, y = after_stat(density), fill = Correct),
@@ -494,7 +494,7 @@ Plot_conf = function(predictions,df, bin = 7){
 
 
   conditional_X_binned = predictions %>%
-    pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
+    # pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
     group_by(subject,X_mid,Correct) %>%
     summarize(mean = mean(Confidence),
               q5 = quantile(Confidence,0.05),
@@ -1755,10 +1755,18 @@ group_predictive = function(predictions,df){
     dataq = bind_rows(
       df%>% mutate(Correct = ifelse(Correct == 1, "Correct","Incorrect")) %>%
         group_by(X) %>%
-        summarize(name = "Type-1",
-                  mean = mean(Y),
-                  q5 = mean-2* sqrt(mean(Y)*(1-mean(Y)) / sqrt(n())),
-                  q95 = mean+2* sqrt(mean(Y)*(1-mean(Y)) / sqrt(n()))),
+        summarize(
+          name = "Type-1",
+          n = n(),
+          k = sum(Y),
+          mean = (1 + k) / (2 + n),
+          q5  = qbeta(0.05, 1 + k, 1 + n - k),
+          q10 = qbeta(0.10, 1 + k, 1 + n - k),
+          q20 = qbeta(0.20, 1 + k, 1 + n - k),
+          q80 = qbeta(0.80, 1 + k, 1 + n - k),
+          q90 = qbeta(0.90, 1 + k, 1 + n - k),
+          q95 = qbeta(0.95, 1 + k, 1 + n - k)
+        ),
 
       df%>% mutate(Correct = ifelse(Correct == 1, "Correct","Incorrect")) %>%
         group_by(X) %>%
@@ -1767,7 +1775,8 @@ group_predictive = function(predictions,df){
                   q5 = mean(RT) - 2 * (sd(RT) / sqrt(n())),
                   q95 = mean(RT) + 2 * (sd(RT) / sqrt(n()))),
 
-      df%>% mutate(Correct = ifelse(Correct == 1, "Correct","Incorrect")) %>%
+      df%>%
+        mutate(Correct = ifelse(Correct == 1, "Correct","Incorrect")) %>%
         group_by(X, Correct) %>%   # <-- group by correctness only here
         summarize(name = "Confidence",
                   mean = mean(Confidence),
@@ -1780,8 +1789,8 @@ group_predictive = function(predictions,df){
 
     predictionsq = bind_rows(
       predictions %>%
-        pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
-        filter(Correct == "Correct") %>%
+        # pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
+        # filter(Correct == "Correct") %>%
         group_by(X) %>%
         summarize(name = "Type-1",
                   mean = mean(prob),
@@ -1793,34 +1802,34 @@ group_predictive = function(predictions,df){
                   q80 = quantile(prob,0.80)),
 
       predictions %>%
-        pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
+        # pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
         group_by(X) %>%
         summarize(name = "RT",
-                  mean = mean(RT_pred),
-                  q5 = quantile(RT_pred,0.05),
-                  q10 = quantile(RT_pred,0.1),
-                  q20 = quantile(RT_pred,0.2),
-                  q95 = quantile(RT_pred,0.95),
-                  q90 = quantile(RT_pred,0.90),
-                  q80 = quantile(RT_pred,0.80)),
+                  mean = mean(rt_mu),
+                  q5 = quantile(rt_mu,0.05),
+                  q10 = quantile(rt_mu,0.1),
+                  q20 = quantile(rt_mu,0.2),
+                  q95 = quantile(rt_mu,0.95),
+                  q90 = quantile(rt_mu,0.90),
+                  q80 = quantile(rt_mu,0.80)),
 
       predictions %>%
-        pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
+        # pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
         group_by(X, Correct) %>%   # <-- group by correctness only here
         summarize(name = "Confidence",
-                  mean = mean(Confidence),
-                  q5 = quantile(Confidence,0.05),
-                  q10 = quantile(Confidence,0.1),
-                  q20 = quantile(Confidence,0.2),
-                  q95 = quantile(Confidence,0.95),
-                  q90 = quantile(Confidence,0.90),
-                  q80 = quantile(Confidence,0.80))
+                  mean = mean(conf_mu_actual),
+                  q5 = quantile(conf_mu_actual,0.05),
+                  q10 = quantile(conf_mu_actual,0.1),
+                  q20 = quantile(conf_mu_actual,0.2),
+                  q95 = quantile(conf_mu_actual,0.95),
+                  q90 = quantile(conf_mu_actual,0.90),
+                  q80 = quantile(conf_mu_actual,0.80))
     ) %>%
       filter(abs(X) < 25)
 
 
 
-   plot =  predictionsq %>%
+   plot_mean =  predictionsq %>%
       ggplot() +
         geom_ribbon(aes(x = X, y = mean,ymin = q5,ymax = q95, fill = Correct),alpha = 0.1)+
         geom_ribbon(aes(x = X, y = mean,ymin = q10,ymax = q90, fill = Correct),alpha = 0.3)+
@@ -1833,8 +1842,70 @@ group_predictive = function(predictions,df){
       labs(color = "Correct")+
       geom_vline(xintercept = 0, linetype = 2)+
       theme(legend.position = "top")
-   plot
-  return(plot)
+   plot_mean
+
+
+
+
+
+   predictionsq = bind_rows(
+     predictions %>%
+       # pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
+       # filter(Correct == "Correct") %>%
+       group_by(X) %>%
+       summarize(name = "Type-1",
+                 mean = mean(prob),
+                 q5 = quantile(prob,0.05),
+                 q10 = quantile(prob,0.1),
+                 q20 = quantile(prob,0.2),
+                 q95 = quantile(prob,0.95),
+                 q90 = quantile(prob,0.90),
+                 q80 = quantile(prob,0.80)),
+
+     predictions %>%
+       # pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
+       group_by(X) %>%
+       summarize(name = "RT",
+                 mean = mean(RT_pred),
+                 q5 = quantile(RT_pred,0.05),
+                 q10 = quantile(RT_pred,0.1),
+                 q20 = quantile(RT_pred,0.2),
+                 q95 = quantile(RT_pred,0.95),
+                 q90 = quantile(RT_pred,0.90),
+                 q80 = quantile(RT_pred,0.80)),
+
+     predictions %>%
+       # pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "Correct") %>%
+       group_by(X, Correct) %>%   # <-- group by correctness only here
+       summarize(name = "Confidence",
+                 mean = mean(Confidence),
+                 q5 = quantile(Confidence,0.05),
+                 q10 = quantile(Confidence,0.1),
+                 q20 = quantile(Confidence,0.2),
+                 q95 = quantile(Confidence,0.95),
+                 q90 = quantile(Confidence,0.90),
+                 q80 = quantile(Confidence,0.80))
+   ) %>%
+     filter(abs(X) < 25)
+
+
+
+   plot_preds =  predictionsq %>%
+     ggplot() +
+     geom_ribbon(aes(x = X, y = mean,ymin = q5,ymax = q95, fill = Correct),alpha = 0.1)+
+     geom_ribbon(aes(x = X, y = mean,ymin = q10,ymax = q90, fill = Correct),alpha = 0.3)+
+     geom_ribbon(aes(x = X, y = mean,ymin = q20,ymax = q80, fill = Correct),alpha = 0.5)+
+     geom_pointrange(data = dataq , aes(x = X, y = mean, ymin = q5, ymax = q95,fill = as.factor(Correct)),
+                     shape = 21, color = "black", alpha = 0.5) +   # only affects responseConf
+     geom_line(aes(x = X, y = mean, color = Correct), linewidth = 1)+
+     facet_wrap(~name, scales = "free", ncol = 3) +
+     theme_classic(base_size = 16) +
+     labs(color = "Correct")+
+     geom_vline(xintercept = 0, linetype = 2)+
+     theme(legend.position = "top")
+   plot_preds
+
+  return(list(plot_mean, plot_preds))
 
 
 }

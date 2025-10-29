@@ -181,7 +181,6 @@ data {
 
   array[S] int t_p_s;
 
-
 }
 transformed data{
   int P = 12;
