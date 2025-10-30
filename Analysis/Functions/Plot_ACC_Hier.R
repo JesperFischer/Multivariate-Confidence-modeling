@@ -222,7 +222,15 @@ Plot_psychometric_ACC_hier = function(predictions, df, bin = 7) {
     labs(x = "Stimulus strength (X)", y = "P(Correct)",
          title = "Psychometric curves") +
     geom_hline(yintercept = 0.5, linetype = 2, alpha = 0.5) +
-    geom_vline(xintercept = 0, linetype = 2, alpha = 0.5)
+    geom_vline(xintercept = 0, linetype = 2, alpha = 0.5)   +
+    theme_classic(base_size = 16) +
+    theme(
+      strip.background = element_blank(),  # remove facet boxes
+      strip.text = element_blank(),        # remove facet labels
+      axis.text = element_blank(),         # remove x and y axis numbers
+      axis.ticks = element_blank(),        # remove tick marks
+      axis.title = element_blank()         # remove axis titles
+    )
 
   return(psychometric_plot)
 }
@@ -271,7 +279,15 @@ Plot_RT_ACC_hier = function(predictions, df, bin = 7) {
     theme_classic(base_size = 16) +
     labs(x = "Stimulus strength (X)", y = "Response Time",
          title = "RT by stimulus strength") +
-    geom_vline(xintercept = 0, linetype = 2, alpha = 0.5)
+    geom_vline(xintercept = 0, linetype = 2, alpha = 0.5)+
+    theme_classic(base_size = 16) +
+    theme(
+      strip.background = element_blank(),  # remove facet boxes
+      strip.text = element_blank(),        # remove facet labels
+      axis.text = element_blank(),         # remove x and y axis numbers
+      axis.ticks = element_blank(),        # remove tick marks
+      axis.title = element_blank()         # remove axis titles
+    )
 
   return(rt_plot)
 }
@@ -325,7 +341,15 @@ Plot_Conf_ACC_hier = function(predictions, df, bin = 7) {
          title = "Confidence by accuracy and stimulus strength",
          color = "Correct") +
     geom_vline(xintercept = 0, linetype = 2, alpha = 0.5) +
-    theme(legend.position = "top")
+    theme(legend.position = "top")+
+    theme_classic(base_size = 16) +
+    theme(
+      strip.background = element_blank(),  # remove facet boxes
+      strip.text = element_blank(),        # remove facet labels
+      axis.text = element_blank(),         # remove x and y axis numbers
+      axis.ticks = element_blank(),        # remove tick marks
+      axis.title = element_blank()         # remove axis titles
+    )
 
   return(conf_plot)
 }
@@ -489,7 +513,7 @@ Get_predictive_group = function(fit, df, n_draws = 50) {
       conf_mu_actual = brms::inv_logit_scaled(conf_mu_logit),
       conf_mu_biased = conf_mu_biased,
       rt_mu = rt_mu_expected,
-      Conf_pred = Conf_pred,
+      Confidence = Conf_pred,
       theta = theta,
       draw = d
     )
@@ -571,7 +595,7 @@ Plot_group_predictive = function(predictions, df) {
                 .groups = "drop"),
 
     predictions %>%
-      group_by(X, ACC) %>%
+      group_by(X, Correct) %>%
       summarize(name = "Confidence",
                 mean = mean(conf_mu_actual),
                 q5 = quantile(conf_mu_actual, 0.05),
@@ -582,7 +606,8 @@ Plot_group_predictive = function(predictions, df) {
                 q80 = quantile(conf_mu_actual, 0.80),
                 .groups = "drop")
   ) %>%
-    filter(abs(X) < 25)
+    filter(abs(X) < 25) %>%
+    mutate(Correct = as.factor(Correct))
 
   # Plot 1: Expected means
   plot_mean = predictionsq_mean %>%
@@ -590,7 +615,7 @@ Plot_group_predictive = function(predictions, df) {
     geom_ribbon(aes(x = X, y = mean, ymin = q5, ymax = q95, fill = Correct), alpha = 0.1) +
     geom_ribbon(aes(x = X, y = mean, ymin = q10, ymax = q90, fill = Correct), alpha = 0.3) +
     geom_ribbon(aes(x = X, y = mean, ymin = q20, ymax = q80, fill = Correct), alpha = 0.5) +
-    geom_pointrange(data = dataq, aes(x = X, y = mean, ymin = q5, ymax = q95, fill = as.factor(Correct)),
+    geom_pointrange(data = dataq, aes(x = X, y = mean, ymin = q5, ymax = q95, fill = (Correct)),
                     shape = 21, color = "black", alpha = 0.5) +
     geom_line(aes(x = X, y = mean, color = Correct), linewidth = 1) +
     facet_wrap(~name, scales = "free", ncol = 3) +
@@ -599,6 +624,8 @@ Plot_group_predictive = function(predictions, df) {
          title = "Group predictions (expected means)") +
     geom_vline(xintercept = 0, linetype = 2) +
     theme(legend.position = "top")
+
+  plot_mean
 
   # Prepare predicted data (using actual samples)
   predictionsq_preds = bind_rows(
@@ -638,7 +665,8 @@ Plot_group_predictive = function(predictions, df) {
                 q80 = quantile(Confidence, 0.80),
                 .groups = "drop")
   ) %>%
-    filter(abs(X) < 25)
+    filter(abs(X) < 25) %>%
+    mutate(Correct = as.factor(Correct))
 
   # Plot 2: Actual predictions
   plot_preds = predictionsq_preds %>%
@@ -655,7 +683,7 @@ Plot_group_predictive = function(predictions, df) {
          title = "Group predictions (posterior predictive samples)") +
     geom_vline(xintercept = 0, linetype = 2) +
     theme(legend.position = "top")
-
+  plot_preds
   return(list(plot_mean = plot_mean, plot_preds = plot_preds))
 }
 

@@ -264,23 +264,26 @@ mcmc_pairs(cor$draws("gm"),np = nuts_params(cor))
 
 
 
-```{r, fig.height=7,fig.width=12}
+```{r, fig.height=7,fig.width=12, warning=FALSE, message=FALSE}
 source(here::here("Analysis","Functions","Plot_ACC_Hier.R"))
 
 preds = Get_predictive_ACC_hier(cor,df1)
 
-Plot_psychometric_ACC_hier(preds,df1)
+Plot_psychometric_ACC_hier(preds,df1, bin = 5)
 
-Plot_RT_ACC_hier(preds,df1)
+Plot_RT_ACC_hier(preds,df1, bin = 5)
 
-Plot_Conf_ACC_hier(preds,df1)
+Plot_Conf_ACC_hier(preds,df1, bin = 5)
 
 ```
-```{r}
+
+```{r, fig.height=7,fig.width=12, warning=FALSE, message=FALSE}
 group_pred = Get_predictive_group(cor,df1,n_draws = 2000)
 
-Plot_group_predictive(group_pred, df1)
+plots = Plot_group_predictive(group_pred, df1)
 
+
+plots
 ```
 
 

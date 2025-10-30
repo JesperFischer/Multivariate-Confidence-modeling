@@ -180,7 +180,8 @@ ends <- cumsum(t_p_s$n)
 # Calculate the start points
 starts <- c(1, head(ends, -1) + 1)
 
-mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
+# mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct_rtstim.stan"))
 
 datastan = list(N = nrow(df1),
                 S = length(unique(df1$subject)),
@@ -207,7 +208,7 @@ cor <-mod$sample(
   init  = 0,
   parallel_chains = 4)
 
-cor$save_object(here::here("Saved models","BIN_ACCs30_real.rds"))
+cor$save_object(here::here("Saved models","BIN_ACCs30_real_rtstim.rds"))
 
 cor$summary("gm")
 mcmc_pairs(cor$draws("gm"),np = nuts_params(cor))
@@ -226,7 +227,10 @@ ends <- cumsum(t_p_s$n)
 # Calculate the start points
 starts <- c(1, head(ends, -1) + 1)
 
-mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
+# mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct_rtstim.stan"))
+
+
 datastan = list(N = nrow(df1),
                 S = length(unique(df1$subject)),
                 starts = starts,
@@ -252,7 +256,7 @@ cor <-mod$sample(
   init  = 0,
   parallel_chains = 4)
 
-cor$save_object(here::here("Saved models","BIN_ACC_s100_real.rds"))
+cor$save_object(here::here("Saved models","BIN_ACC_s100_real_rstim.rds"))
 
 cor$summary("gm")
 mcmc_pairs(cor$draws("gm"),np = nuts_params(cor))
