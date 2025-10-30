@@ -168,7 +168,7 @@ params_all %>% filter(div == 0) %>% ggplot(aes(x = subject, y = mean, ymin = q5,
 
 ```{r, fig.height=7,fig.width=12}
 
-df1 = df %>% filter(!subject %in% c("16") & subject < 5)
+df1 = df %>% filter(!subject %in% c("16") & subject < 30)
 
 df1$subject = as.numeric(as.factor(df1$subject))
 
@@ -207,7 +207,7 @@ cor <-mod$sample(
   init  = 0,
   parallel_chains = 4)
 
-cor$save_object(here::here("Saved models","ACCs30_real_weibull.rds"))
+cor$save_object(here::here("Saved models","BIN_ACCs30_real.rds"))
 
 cor$summary("gm")
 mcmc_pairs(cor$draws("gm"),np = nuts_params(cor))
@@ -226,8 +226,7 @@ ends <- cumsum(t_p_s$n)
 # Calculate the start points
 starts <- c(1, head(ends, -1) + 1)
 
-mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_hier_correct.stan"))
-
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
 datastan = list(N = nrow(df1),
                 S = length(unique(df1$subject)),
                 starts = starts,
@@ -253,7 +252,7 @@ cor <-mod$sample(
   init  = 0,
   parallel_chains = 4)
 
-cor$save_object(here::here("Saved models","ACCs100_real.rds"))
+cor$save_object(here::here("Saved models","BIN_ACC_s100_real.rds"))
 
 cor$summary("gm")
 mcmc_pairs(cor$draws("gm"),np = nuts_params(cor))
