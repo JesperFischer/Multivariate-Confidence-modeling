@@ -1,0 +1,634 @@
+---
+title: "Decender2020"
+output: html_document
+date: "2025-10-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(tidyverse,posterior,tidybayes,cmdstanr, furrr,ordbetareg, future.apply, patchwork,purrr, bayesplot)
+
+
+invisible(
+  lapply(
+    list.files(here::here("Analysis", "Functions"), pattern = "\\.[Rr]$", full.names = TRUE),
+    source
+  )
+)
+```
+
+## R Markdown
+
+# Preprocesing
+
+```{r}
+df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>% 
+    mutate(DecisionRT = as.numeric(DecisionRT),
+           ConfidenceRT = as.numeric(ConfidenceRT),
+         Confidence = as.numeric(Confidence),
+         ResponseCorrect = as.numeric(ifelse(ResponseCorrect == "1",1,
+                                             ifelse(ResponseCorrect == "1.0",1,
+                                                    ifelse(ResponseCorrect == "True",1,
+                                                           ifelse(ResponseCorrect == "0",0,
+                                                                  ifelse(ResponseCorrect == "0.0",0,
+                                                                         ifelse(ResponseCorrect == "False",0,NA))))))),
+         Decision = ifelse(Decision == "More",1,ifelse(Decision == "Less",0,NA))) %>% 
+  mutate(participant_id = as.numeric(as.factor(participant_id))) %>%
+  filter(Modality == "Extero",
+         session == 1) %>% 
+  filter(DecisionRT < 8 & DecisionRT > 0.1)%>% 
+  select(ResponseCorrect,participant_id,DecisionRT,Decision, Confidence, ConfidenceRT, Alpha,cohort)  %>% drop_na() %>% 
+  rename(
+    Confidence = Confidence,
+    X  = Alpha,
+    Y = ResponseCorrect,
+    resp = Decision,
+    RT = DecisionRT,
+    subject = participant_id
+  ) %>% 
+  mutate(Correct = Y,
+         Confidence = Confidence/100)
+
+```
+
+# bad subjects
+```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
+remover(df %>% filter(cohort == "vmp1"))
+removers_vmp1 = c("16")
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1) %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 10))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(cohort == "vmp1"), chunk, bin = 7))
+plots
+```
+
+```{r, fig.height=7,fig.width=12}
+
+df = df %>% filter(!subject %in% c("16") & subject < 50)
+library(dplyr)
+library(cmdstanr)
+library(here)
+library(furrr)
+library(purrr)
+
+# Set up parallel plan (adjust number of workers as needed)
+plan(multisession, workers = 2)
+
+# Precompile model outside the loop — avoids recompiling for each subject
+# mod <- cmdstanr::cmdstan_model(here::here("Stanmodels", "ss", "ACCSS_Correct.stan"))
+mod <- cmdstanr::cmdstan_model(here::here("Stanmodels", "ss", "BINSS_Correct.stan"))
+
+# Define the per-subject fitting function
+fit_subject <- function(s, df, mod) {
+  df1 <- df %>% filter(subject == s)
+  
+  datastan <- list(
+    N = nrow(df1),
+    binom_y = df1$Y,
+    RT = df1$RT,
+    X = df1$X,
+    ACC = df1$Correct,
+    Conf = df1$Confidence,
+    minRT = min(df1$RT)
+  )
+  
+  cor <- mod$sample(
+    data = datastan,
+    refresh = 0,
+    iter_sampling = 500,
+    iter_warmup = 500,
+    adapt_delta = 0.95,
+    max_treedepth = 12,
+    init = 0,
+    parallel_chains = 4
+  )
+  # mcmc_pairs(cor$draws(c("rho_p_rt","rho_rt_conf","rho_p_conf","gm")), np = nuts_params(cor))
+  loglik <- cor$loo()
+  loglik_bin <- cor$loo("log_lik_bin")
+  loglik_rt <- cor$loo("log_lik_rt")
+  loglik_conf <- cor$loo("log_lik_conf")
+  
+  divs = data.frame(cor$diagnostic_summary())
+
+  params <- cor$summary(c("gm", "rho_p_rt", "rho_p_conf", "rho_rt_conf")) %>%
+    mutate(subject = s) %>% mutate(div = sum(divs$num_divergent),
+                                   div = sum(divs$num_max_treedepth),
+                                   time = cor$time()$total,
+                                   ll_elpd_loo = loglik$elpd_loo,
+                                   ll_p_loo = loglik$p_loo,
+                                   ll_dia = sum(loglik$diagnostics$pareto_k > 0.7),
+                                   
+                                   llbin_elpd_loo = loglik_bin$elpd_loo,
+                                   llbin_p_loo = loglik_bin$p_loo,
+                                   llbn_dia = sum(loglik_bin$diagnostics$pareto_k > 0.7),
+                                   
+                                   llrt_elpd_loo = loglik_rt$elpd_loo,
+                                   llrt_p_loo = loglik_rt$p_loo,
+                                   llrt_dia = sum(loglik_rt$diagnostics$pareto_k > 0.7),
+                                   
+                                   llconf_elpd_loo = loglik_conf$elpd_loo,
+                                   llconf_p_loo = loglik_conf$p_loo,
+                                   llconf_dia = sum(loglik_conf$diagnostics$pareto_k > 0.7),)
+  
+  list(params = params,
+       loglik = loglik,
+       loglik_bin = loglik_bin,
+       loglik_rt = loglik_rt,
+       loglik_conf = loglik_conf)
+}
+
+# Run in parallel over subjects
+results <- future_map(unique(df$subject), ~fit_subject(.x, df, mod), .progress = TRUE)
+
+save.image("~/Multivariate-Confidence-modeling/tester.RData")
+
+# Optionally combine the parameter tables
+params_all <- map_dfr(results, "params")
+
+params_all %>% select(subject,div) %>% distinct() %>% ggplot(aes(x = div))+geom_histogram()
+
+params_all %>% filter(div == 0) %>% ggplot(aes(x = ll_elpd_loo, y = mean, ymin = q5,ymax = q95))+
+  facet_wrap(~variable,scales = "free")+geom_pointrange()
+
+
+params_all %>% filter(div == 0) %>% ggplot(aes(x = ll_p_loo, y = mean, ymin = q5,ymax = q95))+
+  facet_wrap(~variable,scales = "free")+geom_pointrange()
+
+
+params_all %>% filter(div == 0) %>% ggplot(aes(x = subject, y = mean, ymin = q5,ymax = q95))+
+  facet_wrap(~variable,scales = "free")+geom_pointrange()
+```
+
+
+
+```{r, fig.height=7,fig.width=12}
+
+df1 = df %>% filter(!subject %in% c("16") & subject < 5)
+
+df1$subject = as.numeric(as.factor(df1$subject))
+
+t_p_s = df1 %>% group_by(subject) %>% summarize(n = n())
+
+
+ends <- cumsum(t_p_s$n)
+
+# Calculate the start points
+starts <- c(1, head(ends, -1) + 1)
+
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
+
+datastan = list(N = nrow(df1),
+                S = length(unique(df1$subject)),
+                starts = starts,
+                minRT = df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT,
+                ends = ends,
+                t_p_s = t_p_s$n,
+                X = df1$X,
+                S_id = df1$subject,
+                RT = df1$RT,
+                ACC = df1$Correct,
+                K = length(unique(df1$Confidence)),
+                Conf = df1$Confidence,
+                binom_y = df1$Y)
+
+
+cor <-mod$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 500,
+  iter_warmup = 500,
+  adapt_delta = 0.95,
+  max_treedepth = 12,
+  init  = 0,
+  parallel_chains = 4)
+
+cor$save_object(here::here("Saved models","ACCs30_real_weibull.rds"))
+
+cor$summary("gm")
+mcmc_pairs(cor$draws("gm"),np = nuts_params(cor))
+
+
+
+df1 = df %>% filter(!subject %in% c("16") & subject < 100)
+
+df1$subject = as.numeric(as.factor(df1$subject))
+
+t_p_s = df1 %>% group_by(subject) %>% summarize(n = n())
+
+
+ends <- cumsum(t_p_s$n)
+
+# Calculate the start points
+starts <- c(1, head(ends, -1) + 1)
+
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_hier_correct.stan"))
+
+datastan = list(N = nrow(df1),
+                S = length(unique(df1$subject)),
+                starts = starts,
+                minRT = df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT,
+                ends = ends,
+                t_p_s = t_p_s$n,
+                X = df1$X,
+                S_id = df1$subject,
+                RT = df1$RT,
+                ACC = df1$Correct,
+                K = length(unique(df1$Confidence)),
+                Conf = df1$Confidence,
+                binom_y = df1$Y)
+
+
+cor <-mod$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 500,
+  iter_warmup = 500,
+  adapt_delta = 0.95,
+  max_treedepth = 12,
+  init  = 0,
+  parallel_chains = 4)
+
+cor$save_object(here::here("Saved models","ACCs100_real.rds"))
+
+cor$summary("gm")
+mcmc_pairs(cor$draws("gm"),np = nuts_params(cor))
+
+
+
+```
+
+
+
+```{r, fig.height=7,fig.width=12}
+source(here::here("Analysis","Functions","Plot_ACC_Hier.R"))
+
+preds = Get_predictive_ACC_hier(cor,df1)
+
+Plot_psychometric_ACC_hier(preds,df1)
+
+Plot_RT_ACC_hier(preds,df1)
+
+Plot_Conf_ACC_hier(preds,df1)
+
+```
+```{r}
+group_pred = Get_predictive_group(cor,df1,n_draws = 2000)
+
+Plot_group_predictive(group_pred, df1)
+
+```
+
+
+```{r}
+Get_predictive = function(fit, df, n_draws, model = "hierarchical"){
+
+  df$subject = as.numeric(as.factor(df$subject))
+
+  workers = 7
+  memory = 8000 * 1024^2
+
+  # Parameters from your hierarchical model
+  parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_ndt","rt_prec",
+                 "conf_prec","meta_un","meta_bias","c0","c11",
+                 "rho_p_rt","rho_p_conf","rho_rt_conf")
+
+  df_param = as_draws_df(cor$draws(parameters)) %>%
+    select(-contains(".")) %>%
+    mutate(draw = 1:n()) %>%
+    pivot_longer(-draw) %>%
+    extract(name, into = c("variable", "subject"),
+            regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE)
+
+  # Set up parallel processing
+  plan(multisession, workers = workers)
+  options(future.globals.maxSize = memory)
+
+  subjects <- unique(df$subject)
+  draws <- 1:n_draws
+
+  # Only use the number of draws that the user wants:
+  dfq = df_param %>% filter(draw %in% draws)
+
+  # Function to get the draws (goes through subjects and then the draws)
+  pred_list <- future_lapply(subjects, function(s) {
+    lapply(draws, function(d) {
+
+      # Extract parameter vectors for that draw and that subject
+      params <- dfq %>%
+        filter(subject == s, draw == d) %>%
+        select(variable, value) %>%
+        pivot_wider(names_from = "variable", values_from = "value")
+
+      data = df %>% filter(subject == s)
+
+      # Helper functions
+      psycho_ACC = function(x, alpha, beta, lapse){
+        0.5 + 0.5 * ((1 - 2 * lapse) * plogis(beta * (x - alpha)))
+      }
+      
+      psycho_ACC = function(x, alpha, beta, lapse){
+        lapse + (1 - 2 * lapse) * plogis(beta * (x - alpha))
+      }
+      
+      entropy = function(p){
+        -p * log(p) - (1-p) * log(1-p)
+      }
+
+      get_prob = function(prob,x){
+        if(x > 0){
+          return(prob)
+        }else{
+          return(1-prob)
+        }
+      }
+      
+      x = data$X
+      n_trials = length(x)
+      
+      # Compute probabilities
+      prob = psycho_ACC(x, exp(params$alpha), exp(params$beta), params$lapse)
+      
+      prob_conf = psycho_ACC(x, exp(params$alpha), exp(params$beta + params$meta_un), params$lapse)
+
+      # Build correlation matrix from subject-specific copula parameters
+      library(copula)
+      cop = normalCopula(param = c(params$rho_p_rt, params$rho_p_conf, params$rho_rt_conf),
+                         dim = 3, dispstr = "un")
+      
+      # Generate correlated uniform samples using Gaussian copula
+      u_samples = rCopula(n_trials, cop)  # N x 3 matrix of correlated uniforms
+      
+      # Transform uniforms to each marginal distribution
+      
+      # 1. Decision (binary) - use inverse CDF
+      bin_pred = qbinom(u_samples[,1], size = 1, prob = prob)
+      
+      # 2. RT (lognormal) - use inverse CDF
+      rt_mu = params$rt_int + params$rt_slope * entropy(prob)
+      RT_pred = qlnorm(u_samples[,2], meanlog = rt_mu, sdlog = params$rt_prec) + params$rt_ndt
+      
+      # 3. Confidence (ordered beta) - condition on decision outcome using get_conf logic
+      confidence_pred_vec = numeric(n_trials)
+      confidence_pred_correct = numeric(n_trials)
+      confidence_pred_incorrect = numeric(n_trials)
+      
+      for(i in 1:n_trials){
+        # Confidence mean based on get_conf logic:
+        # If correct: use prob_conf
+        # If incorrect: use 1-prob_conf
+        conf_mu_if_correct = prob_conf[i]
+        conf_mu_if_incorrect = 1 - prob_conf[i]
+        
+        # Actual confidence (based on actual decision)
+        conf_mu_actual = ifelse(bin_pred[i] == 1, conf_mu_if_correct, conf_mu_if_incorrect)
+        
+        # Use inverse CDF of ordered beta with the copula uniform
+        confidence_pred_vec[i] = qordbeta(u_samples[i,3], 
+                                           mu = conf_mu_actual,
+                                           phi = params$conf_prec,
+                                           cutzero = params$c0, cutone =  params$c0 + exp(params$c11))
+      #   
+      #   # For visualization: counterfactual confidence
+      #   confidence_pred_correct[i] = qordbeta(u_samples[i,3],
+      #                                          mu = conf_mu_if_correct,
+      #                                          phi = params$conf_prec,
+      #                                          cutpoints = c(params$c0, params$c0 + exp(params$c11)))
+      #   
+      #   confidence_pred_incorrect[i] = qordbeta(u_samples[i,3],
+      #                                            mu = conf_mu_if_incorrect,
+      #                                            phi = params$conf_prec,
+      #                                            cutpoints = c(params$c0, params$c0 + exp(params$c11)))
+      }
+
+      predictions = data.frame(
+        X = x, 
+        prob = prob,
+        # prob_conf = prob_conf,
+        bin_pred = bin_pred, 
+        RT_pred = RT_pred,
+        Correct = as.factor(bin_pred),
+        # Correct = confidence_pred_correct,
+        # Incorrect = confidence_pred_incorrect,
+        Confidence = confidence_pred_vec,
+        draw = d, 
+        subject = s
+      )
+
+      return(predictions)
+    })
+  }, future.seed = TRUE)
+
+  # Flatten nested list and create a tidy long dataframe
+  return(predictions = map_dfr(pred_list, bind_rows))
+}
+```
+
+
+```{r, fig.height=7,fig.width=12}
+preds = Get_predictive(cor,df1,20)
+
+bin_pure = Plot_bin(preds,df1, ACC = T)
+
+bin_pure[[1]]+ggtitle("pure")
+bin_pure[[2]]+ggtitle("pure")
+
+```
+
+
+```{r, fig.height=7, fig.width=12}
+rt_pure = Plot_RT(preds,df1, bin = 7)
+rt_pure[[1]]+ggtitle("pure")
+rt_pure[[2]]+ggtitle("pure")
+rt_pure[[3]]+ggtitle("pure")
+
+```
+
+
+
+
+
+
+```{r, fig.height=7, fig.width=12}
+conf_pure = Plot_conf(preds,df1, bin = 7)
+conf_pure[[1]]+ggtitle("pure")
+conf_pure[[2]]+ggtitle("pure")
+
+```
+
+
+```{r}
+Get_predictive_group = function(fit,df,n_draws){
+
+  
+  df$subject = as.numeric(as.factor(df$subject))
+
+  workers = 7
+  memory = 8000 * 1024^2
+
+  parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_prec",
+                 "conf_prec","meta_un","meta_bias")
+
+
+    df_param = as_draws_df(fit$draws("gm")) %>%
+      select(-contains(".")) %>%
+      rename_with(~parameters) %>%
+      mutate(draw = 1:n()) %>%
+      pivot_longer(-draw, names_to = "variable")
+
+
+    constants = as_draws_df(fit$draws(c("rt_ndt","c0","c11",
+                 "rho_p_rt","rho_p_conf","rho_rt_conf"))) %>%
+      select(-contains(".")) %>%
+      mutate(draw = 1:n()) %>%
+      pivot_longer(-draw) %>%
+      extract(name, into = c("variable", "subject"),
+              regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE) %>% group_by(variable) %>%
+      summarize(mean = mean(value)) %>% pivot_wider(names_from = variable,values_from = mean)
+
+
+    # First we select the number of workers and then the memory:
+    plan(multisession, workers = workers)
+    options(future.globals.maxSize = memory)
+
+
+    # and draws per subject
+    draws <- 1:n_draws
+
+    # Only use the number of draws that the user wants:
+    dfq = df_param %>% filter(draw %in% draws)
+
+    # function to get the draws (goes through subjects and then the draws)
+    pred_list <- future_lapply(draws, function(d) {
+
+      # extract parameter vectors (mu, phi, c0 and c1) for that draw and that subject
+      params <- dfq %>%
+        filter(draw == d) %>%
+        select(variable, value) %>%
+        pivot_wider(names_from = "variable", values_from = "value")
+
+
+      psycho_ACC = function(x,alpha,beta,lapse){
+        0.5 + 0.5 * ((1 - 2 * lapse) * plogis(beta * (x - alpha)))
+      }
+      entropy = function(p){
+        -p * log(p) - (1-p) * log(1-p)
+      }
+
+      x = seq(0,40,by = 0.5)
+      prob = psycho_ACC(x, exp(params$alpha), exp(params$beta), brms::inv_logit_scaled(params$lapse)/2)
+
+      prob_conf = psycho_ACC(x, exp(params$alpha), exp(params$beta + params$meta_un), brms::inv_logit_scaled(params$lapse)/2)
+    
+      
+      # Build correlation matrix from subject-specific copula parameters
+      library(copula)
+      cop = normalCopula(param = c(constants$rho_p_rt, constants$rho_p_conf, constants$rho_rt_conf),
+                         dim = 3, dispstr = "un")
+      
+      # Generate correlated uniform samples using Gaussian copula
+      u_samples = rCopula(length(x), cop)  # N x 3 matrix of correlated uniforms
+      
+      # Transform uniforms to each marginal distribution
+      
+      # 1. Decision (binary) - use inverse CDF
+      bin_pred = qbinom(u_samples[,1], size = 1, prob = prob)
+      
+      # 2. RT (lognormal) - use inverse CDF
+      rt_mu = params$rt_int + params$rt_slope * entropy(prob)
+      
+      RT_pred = qlnorm(u_samples[,2], meanlog = rt_mu, sdlog = exp(params$rt_prec)) + constants$rt_ndt
+      
+      # apply inverse logit and scale
+      rt_mu = exp(rt_mu + exp(params$rt_prec)^2 / 2) +constants$rt_ndt
+
+       confidence_pred_vec = numeric(length(x))
+       conf_mu_actual = numeric(length(x))
+
+       for(i in 1:length(x)){
+        conf_mu_if_correct = prob_conf[i]
+        conf_mu_if_incorrect = 1 - prob_conf[i]
+        
+        # Actual confidence (based on actual decision)
+        conf_mu_actual[i] = ifelse(bin_pred[i] == 1, conf_mu_if_correct, conf_mu_if_incorrect)
+        
+        # Use inverse CDF of ordered beta with the copula uniform
+        confidence_pred_vec[i] = qordbeta(u_samples[i,3], 
+                                          mu = conf_mu_actual[i],
+                                          phi = params$conf_prec,
+                                          cutzero = constants$c0, cutone =  constants$c0 + exp(constants$c11))
+      
+    }
+      
+      
+   predictions = data.frame(
+      X = x, 
+      prob = prob,
+      # prob_conf = prob_conf,
+      bin_pred = bin_pred, 
+      RT_pred = RT_pred,
+      rt_mu = rt_mu,
+      Correct = ifelse(bin_pred == 1,"Correct","Incorrect"),
+      # Correct = confidence_pred_correct,
+      # Incorrect = confidence_pred_incorrect,
+      Confidence = confidence_pred_vec,
+      conf_mu_actual = conf_mu_actual,
+      draw = d
+    )
+       
+       
+      return(predictions)
+    },future.seed=TRUE)
+
+    # flatten nested list and create a tidy long dataframe
+    return(predictions = map_dfr(pred_list, bind_rows))
+  
+}
+```
+
+
+
+```{r}
+predictions = Get_predictive_group(cor,df1,2000)
+
+group_predictive(predictions, df1)
+
+```
+
+
+```{r}
+mod1 = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","SS_ent_compar.stan"))
+
+datastan = list(N = nrow(df1),
+                binom_y = df1$Correct,
+                RT = df1$RT,
+                X = abs(df1$X),
+                ACC = df1$Correct,
+                Conf = df1$Confidence,
+                minRT = min(df1$RT)
+              )
+ent <-mod1$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 500,
+  iter_warmup = 500,
+  adapt_delta = 0.95,
+  max_treedepth = 12,
+  init  = 0,
+  parallel_chains = 4)
+
+
+
+
+
+
+
+
+```
+
+
+
