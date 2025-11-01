@@ -596,7 +596,7 @@ Get_predictive_discrete = function(fit, df, n_draws = 50) {
 
       # NOTE: beta, lapse, and rt_prec are extracted from transformed parameters block,
       # so they're already transformed (beta is still log-space, lapse is inv_logit/2, rt_prec is exp)
-      
+
       # Get probability correct for each trial (theta in Stan)
       # Note: beta is in log space in transformed params, needs exp()
       theta = psycho_ACC(x, params$alpha, exp(params$beta), params$lapse)
@@ -610,9 +610,9 @@ Get_predictive_discrete = function(fit, df, n_draws = 50) {
 
       # Create correlation matrix from rho parameters
       copula_obj = normalCopula(param = c(params$rho_p_rt,
-                                         params$rho_p_conf,
-                                         params$rho_rt_conf),
-                               dim = 3, dispstr = "un")
+                                          params$rho_p_conf,
+                                          params$rho_rt_conf),
+                                dim = 3, dispstr = "un")
 
       u_samples = rCopula(n_trials, copula_obj)
 
@@ -631,12 +631,12 @@ Get_predictive_discrete = function(fit, df, n_draws = 50) {
       # 3. Discrete Confidence (ordered categorical)
       # In the ss model: cutpoints - logit(conf_mu) - meta_bias
       # where conf_mu = get_conf(ACC, theta_conf, x, alpha)
-      
+
       # Get confidence mean for each trial based on accuracy
       conf_mu = get_conf(ACC_pred, theta_conf, x, params$alpha)
-      
+
       # The latent variable in logit space: logit(conf_mu) + meta_bias
-      conf_logit = qlogis(conf_mu) + params$meta_bias
+      conf_logit = brms::logit_scaled(conf_mu) - params$meta_bias
 
       # Convert to probabilities using cutpoints
       K = length(cuts) + 1  # Number of categories
@@ -670,7 +670,7 @@ Get_predictive_discrete = function(fit, df, n_draws = 50) {
         rt_mu = rt_mu_expected,
         conf_pred_discrete = conf_pred_discrete,
         conf_mean = conf_mean,
-        conf_mu = conf_mu,
+        conf_mu = brms::inv_logit_scaled(conf_logit),
         draw = d,
         subject = s
       )
@@ -838,8 +838,8 @@ Plot_Conf_discrete = function(predictions, df, bin = 7, draws = F) {
     # Observed data summary
     obs_summary <- df %>%
       group_by(X_mid, subject, Correct) %>%
-      summarize(Conf_mean = mean(Conf),  # Discrete confidence levels
-                se = sd(Conf) / sqrt(n()),
+      summarize(Conf_mean = mean(Confidence),  # Discrete confidence levels
+                se = sd(Confidence) / sqrt(n()),
                 .groups = "drop") %>%
       mutate(Correct = ifelse(Correct == 1, "Correct", "Incorrect"))
 
@@ -853,14 +853,14 @@ Plot_Conf_discrete = function(predictions, df, bin = 7, draws = F) {
     # Plot
     conf_plot <- ggplot() +
       geom_pointrange(data = obs_summary,
-                     aes(x = X_mid, y = Conf_mean,
-                         ymin = Conf_mean - 2*se, ymax = Conf_mean + 2*se,
-                         color = Correct),
-                     size = 0.3, position = position_dodge(width = 0.3)) +
+                      aes(x = X_mid, y = Conf_mean,
+                          ymin = Conf_mean - 2*se, ymax = Conf_mean + 2*se,
+                          color = Correct),
+                      size = 0.3, position = position_dodge(width = 0.3)) +
       geom_line(data = pred_summary,
-               aes(x = X, y = Conf_mean, group = interaction(draw, Correct),
-                   color = Correct),
-               alpha = 0.2) +
+                aes(x = X, y = Conf_mean, group = interaction(draw, Correct),
+                    color = Correct),
+                alpha = 0.2) +
       facet_wrap(~subject, scales = "free_x") +
       theme_classic(base_size = 16) +
       labs(x = "Stimulus strength (X)", y = "Mean Confidence",
@@ -896,21 +896,21 @@ Plot_Conf_discrete = function(predictions, df, bin = 7, draws = F) {
     # Observed data summary
     obs_summary <- df %>%
       group_by(X_mid, subject, Correct) %>%
-      summarize(Conf_mean = mean(Conf),
-                se = sd(Conf) / sqrt(n()),
+      summarize(Conf_mean = mean(Confidence),
+                se = sd(Confidence) / sqrt(n()),
                 .groups = "drop") %>%
       mutate(Correct = ifelse(Correct == 1, "Correct", "Incorrect"))
 
     # Predicted data summary with quantiles
     pred_summary <- predictions %>%
       group_by(X, subject, ACC_pred) %>%
-      summarize(Conf_mean = mean(conf_mean),
-                q5 = quantile(conf_mean, 0.05),
-                q10 = quantile(conf_mean, 0.1),
-                q20 = quantile(conf_mean, 0.2),
-                q95 = quantile(conf_mean, 0.95),
-                q90 = quantile(conf_mean, 0.90),
-                q80 = quantile(conf_mean, 0.80),
+      summarize(Conf_mean = mean(conf_mu ),
+                q5 = quantile(conf_mu , 0.05),
+                q10 = quantile(conf_mu , 0.1),
+                q20 = quantile(conf_mu , 0.2),
+                q95 = quantile(conf_mu , 0.95),
+                q90 = quantile(conf_mu , 0.90),
+                q80 = quantile(conf_mu , 0.80),
                 .groups = "drop") %>%
       rename(Correct = ACC_pred) %>%
       mutate(Correct = ifelse(Correct == 1, "Correct", "Incorrect"))

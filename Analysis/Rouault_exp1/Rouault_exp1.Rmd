@@ -110,8 +110,8 @@ cor$save_object(here::here("Saved models","Rouault_exp1.rds"))
 
 ```{r}
 dd = Get_predictive_discrete(cor,df1)
-psycho_ACC(dd,df1)
 Plot_psychometric_discrete(dd,df1)
+Plot_RT_quad(dd,df1)
 Plot_Conf_discrete(dd,df1)
 ```
 

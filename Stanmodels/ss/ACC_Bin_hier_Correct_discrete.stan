@@ -401,7 +401,7 @@ generated quantities {
 
     log_lik_rt[n] = lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n], rt_prec[S_id[n]]);
 
-    log_lik_conf[n] = ordered_logistic_lpmf(Conf[n] | logit(conf_mu[n]) + meta_un[S_id[n]], cutpoints[S_id[n]]);
+    log_lik_conf[n] = ordered_logistic_lpmf(Conf[n] | logit(conf_mu[n]) + meta_bias[S_id[n]], cutpoints[S_id[n]]);
 
     log_lik[n] = log_lik_bin[n] + log_lik_rt[n] + log_lik_cop[n];
   }
