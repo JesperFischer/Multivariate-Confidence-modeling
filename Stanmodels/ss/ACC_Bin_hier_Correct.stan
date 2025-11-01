@@ -65,7 +65,7 @@ functions {
     vector[S] lapse = inv_logit(param[,3]) / 2;
 
     for (n in 1:N) {
-      real theta = get_prob_cor(psycho_ACC(X[n], exp(alpha[S_id[n]]), exp(beta[S_id[n]]), lapse[S_id[n]]), X[n]);
+      real theta = get_prob_cor(psycho_ACC(X[n], (alpha[S_id[n]]), exp(beta[S_id[n]]), lapse[S_id[n]]), X[n]);
       if (is_upper == 0) {
         u_bounds[n, 1] = binom_y[n] == 0.0
                           ? 0.0 : binomial_cdf(binom_y[n] - 1 | 1, theta);
