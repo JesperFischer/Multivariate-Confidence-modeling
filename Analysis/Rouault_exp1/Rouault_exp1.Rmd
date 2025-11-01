@@ -80,17 +80,17 @@ datastan = list(N = nrow(df1),
                 S_id = df1$subject,
                 RT = df1$RT,
                 ACC = df1$Correct,
-                K = length(unique(df1$Confidence)),
+                K = 11,
                 Conf = df1$Confidence,
-                binom_y = df1$Y)
+                binom_y = df1$Correct)
 
 
 cor <-mod$sample(
   data = datastan,
   refresh = 10,
-  iter_sampling = 1000,
-  iter_warmup = 1000,
-  adapt_delta = 0.99,
+  iter_sampling = 200,
+  iter_warmup = 200,
+  adapt_delta = 0.90,
   max_treedepth = 12,
   init  = 0,
   parallel_chains = 4)

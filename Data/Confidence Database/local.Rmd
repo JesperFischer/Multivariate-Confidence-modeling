@@ -934,3 +934,180 @@ df %>%
 
 ```
 
+
+
+```{r, fig.height=7,fig.width=12}
+dfd <- read_csv(here::here("Data","quad","raw_delayed.csv"))
+
+df %>% filter(trial_type == "decision") %>% 
+  # filter(target_length != 400) %>% 
+  mutate(X = reference_length-target_length) %>% 
+  mutate(Decision = ifelse(answer == "short",1,0)) %>% 
+  group_by(X,confidence_type, bias_source, bias_direction) %>% 
+  summarize(mean = mean(Decision)) %>% 
+  ggplot(aes(x = X,y = mean, col = bias_direction))+facet_grid(confidence_type~bias_source)+geom_point()
+
+
+
+df %>% filter(trial_type == "decision") %>% 
+  # filter(target_length != 400) %>% 
+  mutate(X = reference_length-target_length) %>% 
+  mutate(Decision = ifelse(answer == "short",1,0)) %>% 
+  group_by(X,confidence_type, bias_source, bias_direction) %>% 
+  summarize(mean = mean(rt)) %>% 
+  ggplot(aes(x = X,y = mean, col = bias_direction))+facet_grid(confidence_type~bias_source)+geom_point()
+
+
+
+df %>% filter(trial_type == "decision") %>% 
+  # filter(target_length != 400) %>% 
+  mutate(X = reference_length-target_length) %>% 
+  mutate(Decision = ifelse(answer == "short",1,0)) %>% 
+  mutate(confidence = ifelse(confidence == "low",0,1)) %>% 
+  group_by(X,confidence_type, bias_source, bias_direction,accuracy) %>% 
+  summarize(mean = mean(confidence)) %>% 
+  ggplot(aes(x = X,y = mean, col = interaction(accuracy,bias_direction)))+facet_grid(confidence_type~bias_source)+geom_point()
+```
+
+
+```{r, fig.height=7,fig.width=12}
+df <- read_csv(here::here("Data","quad","raw_concurrent.csv"))
+
+df %>% filter(trial_type == "decision") %>% 
+  # filter(target_length != 400) %>% 
+  mutate(X = reference_length-target_length) %>% 
+  mutate(Decision = ifelse(answer == "short",1,0)) %>% 
+  group_by(X,confidence_type, bias_source, bias_direction) %>% 
+  summarize(mean = mean(Decision)) %>% 
+  ggplot(aes(x = X,y = mean, col = bias_direction))+facet_grid(confidence_type~bias_source)+geom_point()
+
+
+
+df %>% filter(trial_type == "decision") %>% 
+  # filter(target_length != 400) %>% 
+  mutate(X = reference_length-target_length) %>% 
+  mutate(Decision = ifelse(answer == "short",1,0)) %>% 
+  group_by(X,confidence_type, bias_source, bias_direction) %>% 
+  summarize(mean = mean(rt)) %>% 
+  ggplot(aes(x = X,y = mean, col = bias_direction))+facet_grid(confidence_type~bias_source)+geom_point()
+
+
+
+df %>% filter(trial_type == "decision") %>% 
+  # filter(target_length != 400) %>% 
+  mutate(X = reference_length-target_length) %>% 
+  mutate(Decision = ifelse(answer == "short",1,0)) %>% 
+  mutate(confidence = ifelse(confidence == "low",0,1)) %>% 
+  group_by(X,confidence_type, bias_source, bias_direction,accuracy) %>% 
+  summarize(mean = mean(confidence)) %>% 
+  ggplot(aes(x = X,y = mean, col = interaction(accuracy,bias_direction)))+facet_grid(confidence_type~bias_source)+geom_point()
+
+
+
+df %>% filter(trial_type == "decision" & bias_source == "mullerlyer" & bias_direction == "long") %>% 
+    mutate(X = reference_length-target_length) %>% 
+    mutate(Decision = ifelse(answer == "short",1,0)) %>% 
+    mutate(confidence = ifelse(confidence == "low",0,1)) %>% 
+  pivot_longer(cols = c("rt","Decision","confidence")) %>% 
+    group_by(X,confidence_type, bias_source, bias_direction,name) %>% 
+  summarize(mean = mean(value)) %>% 
+  ggplot(aes(x = X,y = mean, col = name))+facet_grid(~name)+geom_point()
+```
+
+
+```{r, fig.height=7,fig.width=12}
+df = df %>% filter(trial_type == "decision" & bias_source == "mullerlyer" & bias_direction == "long") %>% 
+    mutate(X = reference_length-target_length) %>% 
+    mutate(Decision = ifelse(answer == "short",1,0)) %>% 
+    mutate(confidence = ifelse(confidence == "low",0,1)) %>%
+    rename(
+    Confidence = confidence,
+    Y = Decision,
+    Correct = accuracy,
+    RT = rt,
+    subject = participant
+  ) %>% 
+  mutate(ConfidenceRT = NA)
+
+
+df$subject = as.numeric(as.factor(df$subject))
+```
+
+
+
+# bad subjects
+```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
+remover(df)
+removers = c("S065","S076")
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(df %>% filter(!subject %in% removers) %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 10))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(!subject %in% removers), chunk, bin = 7))
+plots
+```
+
+
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+lapply(list(1:10), function(chunk) plot_subjects(df %>% filter(!subject %in% removers), chunk, bin = 7))
+
+```
+
+```{r, fig.height=7,fig.width=12}
+
+df1 = df %>% filter(!subject %in% !subject %in% removers) %>% 
+  filter(subject < 8)
+
+df1$subject = as.numeric(as.factor(df1$subject))
+
+t_p_s = df1 %>% group_by(subject) %>% summarize(n = n())
+
+
+ends <- cumsum(t_p_s$n)
+
+# Calculate the start points
+starts <- c(1, head(ends, -1) + 1)
+
+# mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","quad","quadmodel.stan"))
+
+datastan = list(N = nrow(df1),
+                S = length(unique(df1$subject)),
+                starts = starts,
+                minRT = df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT,
+                ends = ends,
+                t_p_s = t_p_s$n,
+                X = df1$X,
+                S_id = df1$subject,
+                RT = df1$RT,
+                ACC = df1$Correct,
+                Conf = df1$Confidence,
+                binom_y = df1$Correct)
+
+
+cor <-mod$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 200,
+  iter_warmup = 200,
+  adapt_delta = 0.90,
+  max_treedepth = 12,
+  # init  = 0,
+  parallel_chains = 4)
+
+cor$save_object(here::here("Saved models","VMP_BA_ext_ses1.rds"))
+```
+
+```{r}
+dd = Get_predictive_quad(cor,df1)
+Plot_psychometric_quad(dd,df1)
+Plot_RT_quad(dd,df1)
+Plot_Conf_quad(dd,df1)
+```
+
+

@@ -95,7 +95,7 @@ datastan = list(N = nrow(df1),
                 ACC = df1$Correct,
                 K = length(unique(df1$Confidence)),
                 Conf = df1$Confidence,
-                binom_y = df1$Y)
+                binom_y = df1$Correct)
 
 
 cor <-mod$sample(
