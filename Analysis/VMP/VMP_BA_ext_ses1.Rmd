@@ -55,6 +55,11 @@ df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>%
 ```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
 remover(df %>% filter(cohort == "vmp1"))
 removers_vmp1 = c("16","167")
+
+
+remover(df %>% filter(cohort == "vmp2"))
+removers_vmp2 = c("233","263","275","300","298","326","397","495","470","546")
+
 ```
 
 
@@ -66,9 +71,18 @@ plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(coho
 plots
 ```
 
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+subs = unique(df %>% filter(cohort == "vmp2"& !subject %in% removers_vmp2) %>% .$subject)
+n_subj <- length(subs)
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 10))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(cohort == "vmp2") %>% mutate(subject = as.numeric(as.factor(subject))), chunk, bin = 7))
+plots
+```
+
 ```{r, fig.height=7,fig.width=12}
 
-df1 = df %>% filter(!subject %in% c("16"))
+df1 = df %>% filter(!subject %in% c("16", "167")) %>% filter(cohort == "vmp1")
 
 df1$subject = as.numeric(as.factor(df1$subject))
 
@@ -95,7 +109,7 @@ datastan = list(N = nrow(df1),
                 ACC = df1$Correct,
                 K = length(unique(df1$Confidence)),
                 Conf = df1$Confidence,
-                binom_y = df1$Y)
+                binom_y = df1$Correct)
 
 
 cor <-mod$sample(
@@ -108,7 +122,54 @@ cor <-mod$sample(
   init  = 0,
   parallel_chains = 4)
 
-cor$save_object(here::here("Saved models","VMP_BA_ext_ses1.rds"))
+cor$save_object(here::here("Saved models","VMP_BA_ext_ses1_cohort1.rds"))
+
+
+
+
+
+
+df1 = df %>% filter(!subject %in% removers_vmp2 )%>% filter(cohort == "vmp2")
+
+df1$subject = as.numeric(as.factor(df1$subject))
+
+t_p_s = df1 %>% group_by(subject) %>% summarize(n = n())
+
+
+ends <- cumsum(t_p_s$n)
+
+# Calculate the start points
+starts <- c(1, head(ends, -1) + 1)
+
+# mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct_rtstim.stan"))
+
+datastan = list(N = nrow(df1),
+                S = length(unique(df1$subject)),
+                starts = starts,
+                minRT = df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT,
+                ends = ends,
+                t_p_s = t_p_s$n,
+                X = df1$X,
+                S_id = df1$subject,
+                RT = df1$RT,
+                ACC = df1$Correct,
+                K = length(unique(df1$Confidence)),
+                Conf = df1$Confidence,
+                binom_y = df1$Correct)
+
+
+cor <-mod$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 1000,
+  iter_warmup = 1000,
+  adapt_delta = 0.99,
+  max_treedepth = 12,
+  init  = 0,
+  parallel_chains = 4)
+
+cor$save_object(here::here("Saved models","VMP_BA_ext_ses1_cohort2.rds"))
 ```
 
 
