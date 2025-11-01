@@ -1,0 +1,99 @@
+---
+title: "Decender2020"
+output: html_document
+date: "2025-10-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(tidyverse,posterior,tidybayes,cmdstanr, furrr,ordbetareg, future.apply, patchwork,purrr, bayesplot)
+
+
+invisible(
+  lapply(
+    list.files(here::here("Analysis", "Functions"), pattern = "\\.[Rr]$", full.names = TRUE),
+    source
+  )
+)
+```
+
+## R Markdown
+
+# Preprocesing
+
+```{r}
+df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Rouault_2018_Expt1.csv")) %>% 
+  filter(RT_dec < 8 & RT_dec > 0.1)%>% 
+   mutate(X = ifelse(Stimulus == 0, -DotDiff,DotDiff),
+          Correct = (Stimulus == Response)) %>% 
+   rename(
+    Confidence = Confidence,
+    Y = Response,
+    subject = Subj_idx,
+    RT = RT_dec
+  ) %>% 
+  mutate(ConfidenceRT = NA)
+
+```
+
+# bad subjects
+```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
+remover(df)
+
+removers = c("23","88","141","212","221","338","343","445","456","484")
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(df %>% filter(!subject %in% removers) %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 10))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(!subject %in% removers), chunk, bin = 7))
+plots
+```
+
+```{r, fig.height=7,fig.width=12}
+
+df1 = df %>% filter(!subject %in% removers) %>% 
+  filter(subject < 5)
+
+df1$subject = as.numeric(as.factor(df1$subject))
+
+t_p_s = df1 %>% group_by(subject) %>% summarize(n = n())
+
+
+ends <- cumsum(t_p_s$n)
+
+# Calculate the start points
+starts <- c(1, head(ends, -1) + 1)
+
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct_discrete.stan"))
+
+datastan = list(N = nrow(df1),
+                S = length(unique(df1$subject)),
+                starts = starts,
+                minRT = df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT,
+                ends = ends,
+                t_p_s = t_p_s$n,
+                X = df1$X,
+                S_id = df1$subject,
+                RT = df1$RT,
+                ACC = df1$Correct,
+                K = length(unique(df1$Confidence)),
+                Conf = df1$Confidence,
+                binom_y = df1$Y)
+
+
+cor <-mod$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 1000,
+  iter_warmup = 1000,
+  adapt_delta = 0.99,
+  max_treedepth = 12,
+  init  = 0,
+  parallel_chains = 4)
+
+cor$save_object(here::here("Saved models","Rouault_exp1.rds"))
+```
