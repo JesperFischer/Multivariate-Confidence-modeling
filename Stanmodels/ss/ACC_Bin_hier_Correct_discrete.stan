@@ -2,7 +2,7 @@ functions {
 
 
   real psycho_ACC(real x, real alpha, real beta, real lapse){
-   return (0.5+0.5*((1-2*lapse) * inv_logit(beta * (x - alpha))));
+    return (lapse + (1-2*lapse) * inv_logit(beta * (x - alpha)));
 
    }
 
@@ -65,7 +65,7 @@ functions {
 
 
     for (n in 1:N) {
-      real theta = psycho_ACC(X[n], alpha[S_id[n]], beta[S_id[n]], lapse[S_id[n]]);
+      real theta = get_prob_cor(psycho_ACC(X[n], (alpha[S_id[n]]), exp(beta[S_id[n]]), lapse[S_id[n]]), X[n]);
       if (is_upper == 0) {
         u_bounds[n, 1] = binom_y[n] == 0.0
                           ? 0.0 : binomial_cdf(binom_y[n] - 1 | 1, theta);
@@ -175,7 +175,7 @@ functions {
     }
   }
 
-    real get_conf(real ACC, real theta, real x, real alpha){
+  real get_conf(real ACC, real theta, real x, real alpha){
   if(ACC == 1 && x > alpha){
     return(theta);
   }else if(ACC == 1 && x < alpha){
@@ -199,6 +199,7 @@ functions {
 
 }
 }
+
 
 
 
@@ -309,7 +310,7 @@ transformed parameters{
 
 model {
 
-  gm[1] ~ normal(0,10); //global mean of beta
+  gm[1] ~ normal(0,20); //global mean of beta
   gm[2] ~ normal(-2,3); //global mean of beta
   gm[3] ~ normal(-4,2); //global mean of beta
   gm[4:8] ~ normal(0,3); //global mean of beta
