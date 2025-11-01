@@ -691,7 +691,7 @@ psycho_ACC = function(x, alpha, beta, lapse) {
 
 
 # Function to plot psychometric curves for discrete model
-Plot_psychometric_discrete = function(predictions, df, bin = 7, draws = F) {
+Plot_psychometric_discrete = function(predictions, df, bin = 7, draws = F, response_prob = F) {
 
   if(!draws){
     df$subject = as.numeric(as.factor(df$subject))
@@ -710,30 +710,49 @@ Plot_psychometric_discrete = function(predictions, df, bin = 7, draws = F) {
              X_mid = bin_mids[as.integer(X_bin)])
 
     # Observed data summary
-    obs_summary <- df %>%
-      group_by(X_mid, subject) %>%
-      summarize(p_correct = mean(Correct),
-                se = sqrt(p_correct * (1 - p_correct) / n()),
-                .groups = "drop")
-
-    # Predicted data summary
-    pred_summary <- predictions %>%
-      group_by(X, subject, draw) %>%
-      summarize(p_correct = mean(prob_cor), .groups = "drop")
+    if (response_prob) {
+      # Plot P(respond "1") - assumes response is coded as 0/1 where 1 means "respond 1"
+      obs_summary <- df %>%
+        group_by(X_mid, subject) %>%
+        summarize(p_value = mean(Correct),  # Assumes Correct column contains response (0 or 1)
+                  se = sqrt(p_value * (1 - p_value) / n()),
+                  .groups = "drop")
+      
+      pred_summary <- predictions %>%
+        group_by(X, subject, draw) %>%
+        summarize(p_value = mean(theta), .groups = "drop")
+      
+      y_label <- "P(Respond '1')"
+      plot_title <- "Response probability curves"
+    } else {
+      # Plot P(correct)
+      obs_summary <- df %>%
+        group_by(X_mid, subject) %>%
+        summarize(p_value = mean(Correct),
+                  se = sqrt(p_value * (1 - p_value) / n()),
+                  .groups = "drop")
+      
+      pred_summary <- predictions %>%
+        group_by(X, subject, draw) %>%
+        summarize(p_value = mean(prob_cor), .groups = "drop")
+      
+      y_label <- "P(Correct)"
+      plot_title <- "Psychometric curves"
+    }
 
     # Plot
     psychometric_plot <- ggplot() +
       geom_pointrange(data = obs_summary,
-                      aes(x = X_mid, y = p_correct,
-                          ymin = p_correct - 2*se, ymax = p_correct + 2*se),
+                      aes(x = X_mid, y = p_value,
+                          ymin = p_value - 2*se, ymax = p_value + 2*se),
                       size = 0.3) +
       geom_line(data = pred_summary,
-                aes(x = X, y = p_correct, group = draw),
+                aes(x = X, y = p_value, group = draw),
                 alpha = 0.2, color = "red") +
       facet_wrap(~subject, scales = "free_x") +
       theme_classic(base_size = 16) +
-      labs(x = "Stimulus strength (X)", y = "P(Correct)",
-           title = "Psychometric curves") +
+      labs(x = "Stimulus strength (X)", y = y_label,
+           title = plot_title) +
       geom_hline(yintercept = 0.5, linetype = 2, alpha = 0.5) +
       geom_vline(xintercept = 0, linetype = 2, alpha = 0.5) +
       theme(
@@ -763,40 +782,64 @@ Plot_psychometric_discrete = function(predictions, df, bin = 7, draws = F) {
              X_mid = bin_mids[as.integer(X_bin)])
 
     # Observed data summary
-    obs_summary <- df %>%
-      group_by(X_mid, subject) %>%
-      summarize(p_correct = mean(Correct),
-                se = sqrt(p_correct * (1 - p_correct) / n()),
-                .groups = "drop")
-
-    # Predicted data summary with quantiles
-    pred_summary <- predictions %>%
-      group_by(X, subject) %>%
-      summarize(p_correct = mean(prob_cor),
-                q5 = quantile(prob_cor, 0.05),
-                q10 = quantile(prob_cor, 0.1),
-                q20 = quantile(prob_cor, 0.2),
-                q95 = quantile(prob_cor, 0.95),
-                q90 = quantile(prob_cor, 0.90),
-                q80 = quantile(prob_cor, 0.80),
-                .groups = "drop")
+    if (response_prob) {
+      obs_summary <- df %>%
+        group_by(X_mid, subject) %>%
+        summarize(p_value = mean(Correct),
+                  se = sqrt(p_value * (1 - p_value) / n()),
+                  .groups = "drop")
+      
+      pred_summary <- predictions %>%
+        group_by(X, subject) %>%
+        summarize(p_value = mean(theta),
+                  q5 = quantile(theta, 0.05),
+                  q10 = quantile(theta, 0.1),
+                  q20 = quantile(theta, 0.2),
+                  q95 = quantile(theta, 0.95),
+                  q90 = quantile(theta, 0.90),
+                  q80 = quantile(theta, 0.80),
+                  .groups = "drop")
+      
+      y_label <- "P(Respond '1')"
+      plot_title <- "Response probability curves"
+    } else {
+      obs_summary <- df %>%
+        group_by(X_mid, subject) %>%
+        summarize(p_value = mean(Correct),
+                  se = sqrt(p_value * (1 - p_value) / n()),
+                  .groups = "drop")
+      
+      pred_summary <- predictions %>%
+        group_by(X, subject) %>%
+        summarize(p_value = mean(prob_cor),
+                  q5 = quantile(prob_cor, 0.05),
+                  q10 = quantile(prob_cor, 0.1),
+                  q20 = quantile(prob_cor, 0.2),
+                  q95 = quantile(prob_cor, 0.95),
+                  q90 = quantile(prob_cor, 0.90),
+                  q80 = quantile(prob_cor, 0.80),
+                  .groups = "drop")
+      
+      y_label <- "P(Correct)"
+      plot_title <- "Psychometric curves"
+    }
 
     # Plot
     psychometric_plot <- ggplot() +
       geom_pointrange(data = obs_summary,
-                      aes(x = X_mid, y = p_correct,
-                          ymin = p_correct - 2*se, ymax = p_correct + 2*se),
+                      aes(x = X_mid, y = p_value,
+                          ymin = p_value - 2*se, ymax = p_value + 2*se),
                       size = 0.3) +
       geom_line(data = pred_summary,
-                aes(x = X, y = p_correct),
+                aes(x = X, y = p_value),
                 alpha = 0.2, color = "red") +
-      geom_ribbon(data = pred_summary, aes(x = X, y = p_correct, ymin = q5, ymax = q95), alpha = 0.1) +
-      geom_ribbon(data = pred_summary, aes(x = X, y = p_correct, ymin = q10, ymax = q90), alpha = 0.3) +
-      geom_ribbon(data = pred_summary, aes(x = X, y = p_correct, ymin = q20, ymax = q80), alpha = 0.5) +
+      geom_ribbon(data = pred_summary, aes(x = X, y = p_value, ymin = q5, ymax = q95), alpha = 0.1) +
+      geom_ribbon(data = pred_summary, aes(x = X, y = p_value, ymin = q10, ymax = q90), alpha = 0.3) +
+      geom_ribbon(data = pred_summary, aes(x = X, y = p_value, ymin = q20, ymax = q80), alpha = 0.5) +
       facet_wrap(~subject, scales = "free_x") +
       theme_classic(base_size = 16) +
-      labs(x = "Stimulus strength (X)", y = "P(Correct)",
-           title = "Psychometric curves") +
+      labs(x = "Stimulus strength (X)", y = y_label,
+           title = plot_title) +
       geom_hline(yintercept = 0.5, linetype = 2, alpha = 0.5) +
       geom_vline(xintercept = 0, linetype = 2, alpha = 0.5) +
       theme(
