@@ -1061,7 +1061,7 @@ lapply(list(1:10), function(chunk) plot_subjects(df %>% filter(!subject %in% rem
 ```{r, fig.height=7,fig.width=12}
 
 df1 = df %>% filter(!subject %in% !subject %in% removers) %>% 
-  filter(subject < 8)
+  filter(subject < 8) %>% filter(target_length != 400)
 
 df1$subject = as.numeric(as.factor(df1$subject))
 

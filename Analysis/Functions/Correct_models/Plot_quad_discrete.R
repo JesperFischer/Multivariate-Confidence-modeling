@@ -533,7 +533,7 @@ Plot_all_quad = function(fit, df, n_draws = 50, bin = 7, draws = F) {
 # DISCRETE CONFIDENCE MODEL FUNCTIONS
 # ============================================================================
 
-# Function to generate posterior predictive samples for discrete confidence model
+# Function to generate posterior predictive samples for discrete confidence model (ss folder version)
 Get_predictive_discrete = function(fit, df, n_draws = 50) {
 
   df$subject = as.numeric(as.factor(df$subject))
@@ -541,11 +541,10 @@ Get_predictive_discrete = function(fit, df, n_draws = 50) {
   workers = 7
   memory = 10000 * 1024^2
 
-  # Parameters in the discrete confidence model
+  # Parameters in the discrete confidence model (ss version)
   parameters = c("alpha", "beta", "lapse",
                  "rt_int", "rt_slope", "rt_prec", "rt_ndt",
-                 "conf_ACC", "conf_entropy", "conf_entropy_ACC",
-                 "meta_un",
+                 "meta_un", "meta_bias",
                  "rho_p_rt", "rho_p_conf", "rho_rt_conf")
 
   # Extract draws
@@ -595,16 +594,19 @@ Get_predictive_discrete = function(fit, df, n_draws = 50) {
       x = data$X
       n_trials = length(x)
 
-      # Get probability correct for each trial
-      prob_faster = psycho_ACC(x, params$alpha, exp(params$beta), brms::inv_logit_scaled(params$lapse) / 2)
-      prob_cor = prob_faster  # For ACC models, this is already P(correct)
+      # NOTE: beta, lapse, and rt_prec are extracted from transformed parameters block,
+      # so they're already transformed (beta is still log-space, lapse is inv_logit/2, rt_prec is exp)
+      
+      # Get probability correct for each trial (theta in Stan)
+      # Note: beta is in log space in transformed params, needs exp()
+      theta = psycho_ACC(x, params$alpha, exp(params$beta), params$lapse)
+      prob_cor = get_prob_cor(theta, x)
 
-      # Entropy for RT and confidence models
-      entropy_t = entropy(prob_faster)
+      # Entropy for RT model (using base theta, no meta-uncertainty for RT)
+      entropy_t = entropy(theta)
 
       # Theta for confidence (with meta_un)
-      prob_faster_conf = psycho_ACC(x, params$alpha, exp(params$beta + params$meta_un),
-                                    brms::inv_logit_scaled(params$lapse) / 2)
+      theta_conf = psycho_ACC(x, params$alpha, exp(params$beta + params$meta_un), params$lapse)
 
       # Create correlation matrix from rho parameters
       copula_obj = normalCopula(param = c(params$rho_p_rt,
@@ -619,6 +621,7 @@ Get_predictive_discrete = function(fit, df, n_draws = 50) {
       ACC_pred = rbinom(n_trials, 1, prob_cor)
 
       # 2. RT (lognormal)
+      # Note: rt_prec is already exp() transformed in Stan's transformed parameters
       rt_mu = params$rt_int + params$rt_slope * entropy_t
       RT_pred = qlnorm(u_samples[, 2], meanlog = rt_mu, sdlog = params$rt_prec) + params$rt_ndt
 
@@ -626,10 +629,14 @@ Get_predictive_discrete = function(fit, df, n_draws = 50) {
       rt_mu_expected = exp(rt_mu + params$rt_prec^2 / 2) + params$rt_ndt
 
       # 3. Discrete Confidence (ordered categorical)
-      # Compute latent confidence variable
-      conf_latent = params$conf_ACC * ACC_pred +
-                    params$conf_entropy * entropy(prob_faster_conf) +
-                    params$conf_entropy_ACC * ACC_pred * entropy(prob_faster_conf)
+      # In the ss model: cutpoints - logit(conf_mu) - meta_bias
+      # where conf_mu = get_conf(ACC, theta_conf, x, alpha)
+      
+      # Get confidence mean for each trial based on accuracy
+      conf_mu = get_conf(ACC_pred, theta_conf, x, params$alpha)
+      
+      # The latent variable in logit space: logit(conf_mu) + meta_bias
+      conf_logit = qlogis(conf_mu) + params$meta_bias
 
       # Convert to probabilities using cutpoints
       K = length(cuts) + 1  # Number of categories
@@ -639,8 +646,8 @@ Get_predictive_discrete = function(fit, df, n_draws = 50) {
       conf_probs = matrix(0, nrow = n_trials, ncol = K)
 
       for (i in 1:n_trials) {
-        # Compute cumulative probabilities
-        cum_probs = c(0, brms::inv_logit_scaled(cuts - conf_latent[i]), 1)
+        # Compute cumulative probabilities: inv_logit(cutpoints - conf_logit[i])
+        cum_probs = c(0, brms::inv_logit_scaled(cuts - conf_logit[i]), 1)
 
         # Category probabilities
         for (k in 1:K) {
@@ -657,12 +664,13 @@ Get_predictive_discrete = function(fit, df, n_draws = 50) {
       predictions = data.frame(
         X = x,
         prob_cor = prob_cor,
+        theta = theta,
         ACC_pred = ACC_pred,
         RT_pred = RT_pred,
         rt_mu = rt_mu_expected,
         conf_pred_discrete = conf_pred_discrete,
         conf_mean = conf_mean,
-        conf_latent = conf_latent,
+        conf_mu = conf_mu,
         draw = d,
         subject = s
       )
@@ -676,9 +684,9 @@ Get_predictive_discrete = function(fit, df, n_draws = 50) {
 }
 
 
-# Helper function for psycho_ACC used in discrete models
+# Helper function for psycho_ACC used in discrete models (ss version)
 psycho_ACC = function(x, alpha, beta, lapse) {
-  0.5 + 0.5 * ((1 - 2*lapse) * brms::inv_logit_scaled_scaled(beta * (x - alpha)))
+  lapse + (1 - 2*lapse) * brms::inv_logit_scaled(beta * (x - alpha))
 }
 
 
