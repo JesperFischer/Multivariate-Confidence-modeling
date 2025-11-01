@@ -28,6 +28,7 @@ df = read.delim(here::here("Data","Decender2020","rawData.txt"), sep = " ") %>% 
   mutate(conf = ifelse(t2duration == 0,conf+3,conf),
          X  = coh_single,
          ConfidenceRT = NA) %>% 
+  
   mutate(conf = case_when(
     sub == 7 & t2duration == 0 & conf == 4 ~ 6,
     sub == 7 & t2duration == 0 & conf == 6 ~ 4,

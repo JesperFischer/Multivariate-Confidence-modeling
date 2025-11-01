@@ -65,7 +65,7 @@ functions {
     vector[S] lapse = inv_logit(param[,3]) / 2;
 
     for (n in 1:N) {
-      real theta = get_prob_cor(psycho_ACC(X[n], exp(alpha[S_id[n]]), exp(beta[S_id[n]]), lapse[S_id[n]]), X[n]);
+      real theta = get_prob_cor(psycho_ACC(X[n], (alpha[S_id[n]]), exp(beta[S_id[n]]), lapse[S_id[n]]), X[n]);
       if (is_upper == 0) {
         u_bounds[n, 1] = binom_y[n] == 0.0
                           ? 0.0 : binomial_cdf(binom_y[n] - 1 | 1, theta);
@@ -272,11 +272,11 @@ transformed parameters{
 
 }
 model {
-   gm[1] ~ normal(1,1); //global mean of beta
+  gm[1] ~ normal(0,10); //global mean of beta
   gm[2] ~ normal(-2,3); //global mean of beta
   gm[3] ~ normal(-4,2); //global mean of beta
   gm[4:7] ~ normal(0,3); //global mean of beta
-  gm[8] ~ normal(0,1); //global mean of beta
+  gm[8] ~ normal(0,2); //global mean of beta
   gm[9] ~ normal(0,2); //global mean of beta
   gm[10] ~ normal(0,0.1); //global mean of beta
 
@@ -307,9 +307,6 @@ model {
     target += lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
 
     target += ord_beta_reg_lpdf(Conf[n] | logit(conf_mu[n])+ meta_bias[S_id[n]], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
-
-    // target += binomial_lpmf(binom_y[n] | 1, theta[n]);
-
 
   }
 

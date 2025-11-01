@@ -1,9 +1,10 @@
 remover = function(df){
 
-  avg_acc = df %>% group_by(subject) %>%
-    summarize(mean = mean(Correct),
-              se = (mean(Correct) * (1-mean(Correct))) /sqrt(n())) %>%
-    mutate(measure = "A")
+
+    avg_acc = df %>% group_by(subject) %>%
+      summarize(mean = mean(Correct),
+                se = (mean(Correct) * (1-mean(Correct))) /sqrt(n())) %>%
+      mutate(measure = "A")
 
   avg_rt = df %>%
     group_by(subject) %>%
@@ -49,7 +50,8 @@ remover = function(df){
   plotallsubj = inner_join(rbind(avg_acc,avg_rt,avg_conf,avg_confrt),outliers, by = "measure") %>%
     mutate(outlier = ifelse(mean < low_int | mean > high_int,1,0)) %>%
     ggplot(aes(x = subject, y = mean, ymin = mean-se, ymax = mean+se, col = as.factor(outlier)))+
-    facet_wrap(~measure, scales = "free")+theme_minimal()+geom_pointrange()
+    facet_wrap(~measure, scales = "free")+
+    theme_minimal()+geom_pointrange()
 
   badids = dd %>% filter(outlier == 1) %>% .$subject
 

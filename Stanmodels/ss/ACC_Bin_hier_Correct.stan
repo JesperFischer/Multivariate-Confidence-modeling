@@ -271,11 +271,11 @@ transformed parameters{
 
 }
 model {
-   gm[1] ~ normal(1,1); //global mean of beta
+   gm[1] ~ normal(0,10); //global mean of beta
   gm[2] ~ normal(-2,3); //global mean of beta
   gm[3] ~ normal(-4,2); //global mean of beta
   gm[4:7] ~ normal(0,3); //global mean of beta
-  gm[8] ~ normal(0,1); //global mean of beta
+  gm[8] ~ normal(0,2); //global mean of beta
   gm[9] ~ normal(0,2); //global mean of beta
 
 
@@ -304,9 +304,6 @@ model {
     target += lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n], rt_prec[S_id[n]]);
 
     target += ord_beta_reg_lpdf(Conf[n] | logit(conf_mu[n])+ meta_bias[S_id[n]], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
-
-    // target += binomial_lpmf(binom_y[n] | 1, theta[n]);
-
 
   }
 
