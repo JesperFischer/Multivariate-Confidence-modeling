@@ -430,12 +430,12 @@ df <- read_csv(here::here("Data","Confidence Database","Confidence Database","da
 
 
 
-df %>%
+df %>% 
   group_by(Condition) %>% filter(SN != max(SN) & SN != min(SN)) %>%
          mutate(ACC = ifelse(Stimulus == Response,1,0),
                 Difficulty  = ifelse(Stimulus == 2, SN , -SN),
                 Response = Response-1,
-                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+                Confidence = Confidence) %>% 
   
   # filter(Difficulty != min(Difficulty)) %>% 
   ungroup() %>% 
@@ -461,8 +461,7 @@ df %>%
   group_by(Condition) %>% 
          mutate(ACC = ifelse(Stimulus == Response,1,0),
                 Difficulty  = ifelse(Stimulus == 2, SN , -SN),
-                Response = Response-1,
-                Confidence = Confidence/max(Confidence,na.rm = T)) %>% 
+                Response = Response-1) %>% 
   ungroup() %>% 
   pivot_longer(cols = c(Response,Confidence,RT_conf,RT_dec))%>% 
   mutate(Difficulty_bin = cut(Difficulty, breaks = 20, labels = FALSE)) %>% 
@@ -472,6 +471,35 @@ df %>%
   ggplot(aes(x = Difficulty_bin , col = as.factor(ACC)))+
   geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
   facet_wrap(Condition~name, scales = "free")+theme_minimal()+theme(legend.position = "top")
+
+
+
+
+
+
+
+
+df %>% 
+  group_by(Condition) %>% filter(SN != max(SN) & SN != min(SN)) %>%
+         mutate(ACC = ifelse(Stimulus == Response,1,0),
+                Difficulty  = ifelse(Stimulus == 2, SN , -SN),
+                Response = Response-1,
+                Confidence = Confidence) %>% 
+  
+  # filter(Difficulty != min(Difficulty)) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Response,Confidence,RT_dec))%>% 
+  filter(name == "Confidence") %>% 
+  mutate(Difficulty_bin = cut(Difficulty, breaks = 6)) %>% 
+  group_by(Difficulty_bin ,Stimulus,Subj_idx,Condition, ACC) %>% 
+  summarize(mean = mean(value,na.rm = T),
+            se = sd(value,na.rm = T)/sqrt(n())) %>% 
+  ggplot(aes(x = Difficulty_bin , col = as.factor(ACC)))+
+  geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
+  facet_wrap(Subj_idx~Condition, scales = "free")+theme_minimal()+
+  theme(legend.position = "top"
+)
+
 ```
 
 

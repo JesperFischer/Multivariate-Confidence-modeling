@@ -25,6 +25,8 @@ invisible(
 ```{r}
 df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Adler_2018_Expt1.csv"))
 
+df %>% ggplot(aes(x = Orientation, fill = as.factor(Stimulus)))+geom_histogram(position = "identity", alpha = 0.5)
+
 df %>%
   mutate(Difficulty = ifelse(Stimulus == 2, 13 - Difficulty, Difficulty),
          ACC = ifelse(Stimulus == Response,1,0),
@@ -39,10 +41,10 @@ df %>%
   
 
 df %>%
-  mutate(Difficulty = ifelse(Stimulus == 2, 13 - Difficulty, Difficulty),
+  mutate(Difficulty = ifelse(Stimulus == 2,  13- Difficulty, Difficulty),
          ACC = ifelse(Stimulus == Response,1,0),
          Response = Response-1,
-         Confidence = Confidence/max(Confidence)) %>% 
+         Confidence = Confidence) %>% 
   pivot_longer(cols = c(Response,Confidence,RT_decConf))%>% group_by(Difficulty,name,Task,ACC) %>% 
   summarize(mean = mean(value),
             se = sd(value)/sqrt(n())) %>% 
@@ -50,6 +52,153 @@ df %>%
   geom_pointrange(aes(y = mean,ymin = mean-2*se, ymax = mean+2*se))+
   facet_grid(Task~name, scales = "free")+theme_minimal()
 
+
+```
+
+
+```{r, fig.height=6, fig.width=10}
+df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Rouault_2018_Expt1.csv"))
+
+df %>% ggplot(aes(x = DotDiff, fill = as.factor(Stimulus)))+geom_histogram(position = "identity", alpha = 0.5)
+
+df %>% group_by(Subj_idx) %>% summarise(mean = mean(Stimulus == Response)) %>% ggplot(aes(x = Subj_idx, y = mean))+geom_point()
+
+dfq = df %>% 
+  mutate(
+           Contrast = ifelse(Stimulus == 0, -DotDiff,DotDiff),
+          Difficulty =  cut(Contrast,20),
+         Correct = Stimulus == Response) %>% 
+   rename(
+    Confidence = Confidence,
+    X  = Difficulty,
+    Y = Response,
+    subject = Subj_idx
+  ) 
+
+dfq %>% group_by(X, Stimulus) %>% 
+  # filter(subject<5) %>% 
+  summarise(mean = mean(Y)) %>% 
+  ggplot(aes(x = X, y =mean)) + geom_point(aes(color = as.factor(Stimulus)))
+  facet_grid(~Correct)
+  # geom_line(aes(group = subject))
+  
+dfq %>% group_by(X, Stimulus) %>% 
+  # filter(subject<5) %>% 
+  summarise(mean = mean(Correct)) %>% 
+  ggplot(aes(x = X, y =mean)) + geom_point(aes(color = as.factor(Stimulus)))
+  facet_grid(~Correct)
+  
+  
+  
+  # mod <- cmdstanr::cmdstan_model(here::here("Stanmodels", "ss", "ACCSS_Correct.stan"))
+mod <- cmdstanr::cmdstan_model(here::here("Stanmodels", "ss","real", "ACC_bin_ss_correct.stan"))
+
+# mod <- cmdstanr::cmdstan_model(here::here("Stanmodels", "ss","real", "ACC_bin_ss_correct_vec.stan"))
+
+
+df1 <- df %>% filter(Subj_idx == 2)%>% 
+  mutate(
+    Contrast = ifelse(Stimulus == 0, -DotDiff,DotDiff),
+    Correct = Stimulus == Response) %>% 
+  rename(
+    Confidence = Confidence,
+    X  = Contrast,
+    Y = Correct,
+    RT = RT_dec,
+    subject = Subj_idx
+  )  %>% 
+  mutate(Correct = Y,
+         Confidence = Confidence/max(Confidence))
+
+
+df1 %>% mutate(
+          X =  cut(X,20))  %>% 
+  group_by(X, Stimulus) %>%  
+  summarise(mean = mean(Y)) %>% 
+  ggplot(aes(x = X, y =mean)) + geom_point(aes(color = as.factor(Stimulus)))
+
+df1 %>% mutate(
+          X =  cut(X,20))  %>% 
+  group_by(X, Stimulus) %>%  
+  summarise(mean = mean(RT)) %>% 
+  ggplot(aes(x = X, y =mean)) + geom_point(aes(color = as.factor(Stimulus)))
+
+  
+df1 %>% mutate(
+          X =  cut(X,20))  %>% 
+  group_by(X, Stimulus, Correct) %>%  
+  summarise(mean = mean(Confidence)) %>% 
+  ggplot(aes(x = X, y =mean)) + geom_point(aes(color = as.factor(Stimulus)))+
+  facet_grid(~Correct)
+  
+
+
+datastan <- list(
+  N = nrow(df1),
+  binom_y = df1$Y,
+  RT = df1$RT,
+  X = df1$X,
+  X_above0 = df1$X > 0,
+  X_below0 = df1$X < 0,
+  ACC = df1$Correct,
+  Conf = df1$Confidence,
+  
+  y0 = as.integer(df1$Confidence == 0),
+  y1 = as.integer(df1$Confidence == 1),
+  y01 = as.integer(!df1$Confidence %in% c(0,1)),
+  
+  minRT = min(df1$RT)
+)
+
+cor_novec <- mod$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 500,
+  iter_warmup = 500,
+  adapt_delta = 0.95,
+  max_treedepth = 12,
+  init = 0,
+  parallel_chains = 4
+)
+
+  
+cor$summary("gm")
+
+```
+
+
+
+```{r, fig.height=6, fig.width=10}
+df = read_csv(here::here("Data","Confidence Database","Confidence Database","data_Rouault_2018_Expt2.csv"))
+
+df %>% ggplot(aes(x = DotDiff, fill = as.factor(Stimulus)))+geom_histogram(position = "identity", alpha = 0.5)
+
+df %>% group_by(Subj_idx) %>% summarise(mean = mean(Stimulus == Response)) %>% ggplot(aes(x = Subj_idx, y = mean))+geom_point()
+
+dfq = df %>% 
+  mutate(
+           Contrast = ifelse(Stimulus == 0, -DotDiff,DotDiff),
+          Difficulty =  cut(Contrast,20),
+         Correct = Stimulus == Response) %>% 
+   rename(
+    Confidence = Confidence,
+    X  = Difficulty,
+    Y = Response,
+    subject = Subj_idx
+  ) 
+
+dfq %>% group_by(X, Stimulus) %>% 
+  # filter(subject<5) %>% 
+  summarise(mean = mean(Y)) %>% 
+  ggplot(aes(x = X, y =mean)) + geom_point(aes(color = as.factor(Stimulus)))
+  facet_grid(~Correct)
+  # geom_line(aes(group = subject))
+  
+dfq %>% group_by(X, Stimulus) %>% 
+  # filter(subject<5) %>% 
+  summarise(mean = mean(Correct)) %>% 
+  ggplot(aes(x = X, y =mean)) + geom_point(aes(color = as.factor(Stimulus)))
+  facet_grid(~Correct)
 ```
 
 
