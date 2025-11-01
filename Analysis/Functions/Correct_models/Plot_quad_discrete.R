@@ -533,163 +533,6 @@ Plot_all_quad = function(fit, df, n_draws = 50, bin = 7, draws = F) {
 # DISCRETE CONFIDENCE MODEL FUNCTIONS
 # ============================================================================
 
-# Function to generate posterior predictive samples for discrete confidence model (ss folder version)
-Get_predictive_discrete = function(fit, df, n_draws = 50) {
-
-  df$subject = as.numeric(as.factor(df$subject))
-
-  workers = 7
-  memory = 10000 * 1024^2
-
-  # Parameters in the discrete confidence model (ss version)
-  parameters = c("alpha", "beta", "lapse",
-                 "rt_int", "rt_slope", "rt_prec", "rt_ndt",
-                 "meta_un", "meta_bias",
-                 "rho_p_rt", "rho_p_conf", "rho_rt_conf")
-
-  # Extract draws
-  df_param = as_draws_df(fit$draws(parameters)) %>%
-    select(-contains(".")) %>%
-    mutate(draw = 1:n()) %>%
-    pivot_longer(-draw) %>%
-    extract(name, into = c("variable", "subject"),
-            regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE)
-
-  # Extract cutpoints (these may have different dimensions per subject)
-  cutpoints_raw = as_draws_df(fit$draws("cutpoints")) %>%
-    select(-contains(".")) %>%
-    mutate(draw = 1:n()) %>%
-    pivot_longer(-draw) %>%
-    extract(name, into = c("variable", "subject", "cutpoint"),
-            regex = "([a-zA-Z0-9_]+)\\[(\\d+),(\\d+)\\]", convert = TRUE)
-
-  # Set up parallel processing
-  plan(multisession, workers = workers)
-  options(future.globals.maxSize = memory)
-
-  subjects <- unique(df$subject)
-  draws <- 1:n_draws
-
-  # Only use the number of draws that the user wants:
-  dfq = df_param %>% filter(draw %in% draws)
-  cutq = cutpoints_raw %>% filter(draw %in% draws)
-
-  # Function to generate predictions per subject and draw
-  pred_list <- future_lapply(subjects, function(s) {
-    lapply(draws, function(d) {
-
-      # Extract parameters for this subject and draw
-      params <- dfq %>%
-        filter(subject == s, draw == d) %>%
-        select(variable, value) %>%
-        pivot_wider(names_from = "variable", values_from = "value")
-
-      # Extract cutpoints for this subject and draw
-      cuts <- cutq %>%
-        filter(subject == s, draw == d) %>%
-        arrange(cutpoint) %>%
-        pull(value)
-
-      data = df %>% filter(subject == s)
-      x = data$X
-      n_trials = length(x)
-
-      # NOTE: beta, lapse, and rt_prec are extracted from transformed parameters block,
-      # so they're already transformed (beta is still log-space, lapse is inv_logit/2, rt_prec is exp)
-
-      # Get probability correct for each trial (theta in Stan)
-      # Note: beta is in log space in transformed params, needs exp()
-      theta = psycho_ACC(x, params$alpha, exp(params$beta), params$lapse)
-      prob_cor = get_prob_cor(theta, x)
-
-      # Entropy for RT model (using base theta, no meta-uncertainty for RT)
-      entropy_t = entropy(theta)
-
-      # Theta for confidence (with meta_un)
-      theta_conf = psycho_ACC(x, params$alpha, exp(params$beta + params$meta_un), params$lapse)
-
-      # Create correlation matrix from rho parameters
-      copula_obj = normalCopula(param = c(params$rho_p_rt,
-                                          params$rho_p_conf,
-                                          params$rho_rt_conf),
-                                dim = 3, dispstr = "un")
-
-      u_samples = rCopula(n_trials, copula_obj)
-
-      # Transform uniforms to marginal distributions
-      # 1. Accuracy
-      ACC_pred = rbinom(n_trials, 1, prob_cor)
-
-      # 2. RT (lognormal)
-      # Note: rt_prec is already exp() transformed in Stan's transformed parameters
-      rt_mu = params$rt_int + params$rt_slope * entropy_t
-      RT_pred = qlnorm(u_samples[, 2], meanlog = rt_mu, sdlog = params$rt_prec) + params$rt_ndt
-
-      # Calculate expected RT mean
-      rt_mu_expected = exp(rt_mu + params$rt_prec^2 / 2) + params$rt_ndt
-
-      # 3. Discrete Confidence (ordered categorical)
-      # In the ss model: cutpoints - logit(conf_mu) - meta_bias
-      # where conf_mu = get_conf(ACC, theta_conf, x, alpha)
-
-      # Get confidence mean for each trial based on accuracy
-      conf_mu = get_conf(ACC_pred, theta_conf, x, params$alpha)
-
-      # The latent variable in logit space: logit(conf_mu) + meta_bias
-      conf_logit = brms::logit_scaled(conf_mu) - params$meta_bias
-
-      # Convert to probabilities using cutpoints
-      K = length(cuts) + 1  # Number of categories
-
-      # For each trial, determine confidence category
-      conf_pred_discrete = numeric(n_trials)
-      conf_probs = matrix(0, nrow = n_trials, ncol = K)
-
-      for (i in 1:n_trials) {
-        # Compute cumulative probabilities: inv_logit(cutpoints - conf_logit[i])
-        cum_probs = c(0, brms::inv_logit_scaled(cuts - conf_logit[i]), 1)
-
-        # Category probabilities
-        for (k in 1:K) {
-          conf_probs[i, k] = cum_probs[k+1] - cum_probs[k]
-        }
-
-        # Sample discrete confidence
-        conf_pred_discrete[i] = sample(1:K, size = 1, prob = conf_probs[i, ])
-      }
-
-      # Mean confidence (expected value)
-      conf_mean = rowSums(conf_probs * matrix(1:K, nrow = n_trials, ncol = K, byrow = TRUE))
-
-      predictions = data.frame(
-        X = x,
-        prob_cor = prob_cor,
-        theta = theta,
-        ACC_pred = ACC_pred,
-        RT_pred = RT_pred,
-        rt_mu = rt_mu_expected,
-        conf_pred_discrete = conf_pred_discrete,
-        conf_mean = conf_mean,
-        conf_mu = brms::inv_logit_scaled(conf_logit),
-        draw = d,
-        subject = s
-      )
-
-      return(predictions)
-    })
-  }, future.seed = TRUE)
-
-  # Flatten nested list and create a tidy long dataframe
-  return(map_dfr(pred_list, bind_rows))
-}
-
-
-# Helper function for psycho_ACC used in discrete models (ss version)
-psycho_ACC = function(x, alpha, beta, lapse) {
-  lapse + (1 - 2*lapse) * brms::inv_logit_scaled(beta * (x - alpha))
-}
-
-
 # Function to plot psychometric curves for discrete model
 Plot_psychometric_discrete = function(predictions, df, bin = 7, draws = F, response_prob = F) {
 
@@ -714,14 +557,14 @@ Plot_psychometric_discrete = function(predictions, df, bin = 7, draws = F, respo
       # Plot P(respond "1") - assumes response is coded as 0/1 where 1 means "respond 1"
       obs_summary <- df %>%
         group_by(X_mid, subject) %>%
-        summarize(p_value = mean(Correct),  # Assumes Correct column contains response (0 or 1)
+        summarize(p_value = mean(Y),  # Assumes Correct column contains response (0 or 1)
                   se = sqrt(p_value * (1 - p_value) / n()),
                   .groups = "drop")
-      
+
       pred_summary <- predictions %>%
         group_by(X, subject, draw) %>%
         summarize(p_value = mean(theta), .groups = "drop")
-      
+
       y_label <- "P(Respond '1')"
       plot_title <- "Response probability curves"
     } else {
@@ -731,11 +574,11 @@ Plot_psychometric_discrete = function(predictions, df, bin = 7, draws = F, respo
         summarize(p_value = mean(Correct),
                   se = sqrt(p_value * (1 - p_value) / n()),
                   .groups = "drop")
-      
+
       pred_summary <- predictions %>%
         group_by(X, subject, draw) %>%
         summarize(p_value = mean(prob_cor), .groups = "drop")
-      
+
       y_label <- "P(Correct)"
       plot_title <- "Psychometric curves"
     }
@@ -788,7 +631,7 @@ Plot_psychometric_discrete = function(predictions, df, bin = 7, draws = F, respo
         summarize(p_value = mean(Correct),
                   se = sqrt(p_value * (1 - p_value) / n()),
                   .groups = "drop")
-      
+
       pred_summary <- predictions %>%
         group_by(X, subject) %>%
         summarize(p_value = mean(theta),
@@ -799,7 +642,7 @@ Plot_psychometric_discrete = function(predictions, df, bin = 7, draws = F, respo
                   q90 = quantile(theta, 0.90),
                   q80 = quantile(theta, 0.80),
                   .groups = "drop")
-      
+
       y_label <- "P(Respond '1')"
       plot_title <- "Response probability curves"
     } else {
@@ -808,7 +651,7 @@ Plot_psychometric_discrete = function(predictions, df, bin = 7, draws = F, respo
         summarize(p_value = mean(Correct),
                   se = sqrt(p_value * (1 - p_value) / n()),
                   .groups = "drop")
-      
+
       pred_summary <- predictions %>%
         group_by(X, subject) %>%
         summarize(p_value = mean(prob_cor),
@@ -819,7 +662,7 @@ Plot_psychometric_discrete = function(predictions, df, bin = 7, draws = F, respo
                   q90 = quantile(prob_cor, 0.90),
                   q80 = quantile(prob_cor, 0.80),
                   .groups = "drop")
-      
+
       y_label <- "P(Correct)"
       plot_title <- "Psychometric curves"
     }

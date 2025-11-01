@@ -64,7 +64,7 @@ lapply(list(1:8), function(chunk) plot_subjects(df %>% filter(!subject %in% remo
 ```{r, fig.height=7,fig.width=12}
 
 df1 = df %>% filter(!subject %in% removers) %>% 
-  filter(subject < 10)
+  filter(subject < 100)
 
 df1$subject = as.numeric(as.factor(df1$subject))
 
@@ -99,7 +99,7 @@ cor <-mod$sample(
   refresh = 10,
   iter_sampling = 500,
   iter_warmup = 500,
-  adapt_delta = 0.90,
+  adapt_delta = 0.95,
   max_treedepth = 12,
   # init  = 0,
   parallel_chains = 4)
@@ -110,7 +110,7 @@ cor$save_object(here::here("Saved models","Rouault_exp1.rds"))
 
 ```{r}
 dd = Get_predictive_discrete(cor,df1)
-Plot_psychometric_discrete(dd,df1)
+Plot_psychometric_discrete(dd,df1,response_prob = T)
 Plot_RT_quad(dd,df1)
 Plot_Conf_discrete(dd,df1)
 ```
