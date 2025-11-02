@@ -276,7 +276,7 @@ transformed parameters{
   for (n in 1:N) {
   theta[n] = get_prob_cor(psycho_ACC(X[n], (alpha[S_id[n]]), exp(beta[S_id[n]]), lapse[S_id[n]]), X[n]);
 
-  entropy_t[n] = entropy(psycho_ACC(X[n], (alpha[S_id[n]]), exp(beta[S_id[n]]), lapse[S_id[n]]));
+  entropy_t[n] = entropy(theta[n]);
 
   theta_conf[n] = psycho_ACC(X[n], (alpha[S_id[n]]), exp(beta[S_id[n]] + meta_un[S_id[n]]), lapse[S_id[n]]);
 

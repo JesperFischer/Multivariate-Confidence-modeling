@@ -937,7 +937,7 @@ df %>%
 
 
 ```{r, fig.height=7,fig.width=12}
-dfd <- read_csv(here::here("Data","quad","raw_delayed.csv"))
+df <- read_csv(here::here("Data","quad","raw_delayed.csv"))
 
 df %>% filter(trial_type == "decision") %>% 
   # filter(target_length != 400) %>% 
@@ -1016,7 +1016,8 @@ df %>% filter(trial_type == "decision" & bias_source == "mullerlyer" & bias_dire
 
 
 ```{r, fig.height=7,fig.width=12}
-df = df %>% filter(trial_type == "decision" & bias_source == "mullerlyer" & bias_direction == "long") %>% 
+df = df %>% 
+  filter(trial_type == "decision" & bias_source == "mullerlyer" & bias_direction == "long") %>% 
     mutate(X = reference_length-target_length) %>% 
     mutate(Decision = ifelse(answer == "short",1,0)) %>% 
     mutate(confidence = ifelse(confidence == "low",0,1)) %>%
@@ -1027,7 +1028,8 @@ df = df %>% filter(trial_type == "decision" & bias_source == "mullerlyer" & bias
     RT = rt,
     subject = participant
   ) %>% 
-  mutate(ConfidenceRT = NA)
+  mutate(ConfidenceRT = NA) %>% 
+  mutate(Correct = ifelse(Correct,1,0))
 
 
 df$subject = as.numeric(as.factor(df$subject))
@@ -1054,14 +1056,16 @@ plots
 
 
 ```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
-lapply(list(1:10), function(chunk) plot_subjects(df %>% filter(!subject %in% removers), chunk, bin = 7))
+lapply(list(c(11,13,15,17,5,10)), function(chunk) plot_subjects(df %>% filter(!subject %in% removers), chunk, bin = 7))
 
 ```
 
 ```{r, fig.height=7,fig.width=12}
 
-df1 = df %>% filter(!subject %in% !subject %in% removers) %>% 
-  filter(subject < 8) %>% filter(target_length != 400)
+df1 = df %>% 
+  filter(!subject %in% !subject %in% removers) %>% 
+  filter(subject %in% c("11","13","15","17","5","10")) %>% 
+  filter(target_length != 400)
 
 df1$subject = as.numeric(as.factor(df1$subject))
 
@@ -1093,9 +1097,9 @@ datastan = list(N = nrow(df1),
 cor <-mod$sample(
   data = datastan,
   refresh = 10,
-  iter_sampling = 200,
-  iter_warmup = 200,
-  adapt_delta = 0.90,
+  iter_sampling = 300,
+  iter_warmup = 300,
+  adapt_delta = 0.95,
   max_treedepth = 12,
   # init  = 0,
   parallel_chains = 4)

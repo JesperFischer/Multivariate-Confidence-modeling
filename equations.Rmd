@@ -1,0 +1,42 @@
+---
+title: "Model Equations"
+author: ""
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Linear Model
+
+The linear model can be expressed as:
+
+$$
+y \sim \mathcal{N}(\underbrace{a + bx}_{\text{model}},{\sigma})
+$$
+
+Alternatively, we can write this more explicitly as:
+
+$$
+y \sim \underbrace{\mathcal{N}(\cdot, \sigma)}_{\text{likelihood}} \quad \text{where} \quad \underbrace{a + bx}_{\text{model}}
+$$
+
+Or in a more standard form:
+
+$$
+y_i \sim \mathcal{N}(\mu_i, \sigma) \quad Likeihood
+$$
+$$
+\mu_i = a + bx_i  \quad Model
+$$
+$$
+\mathcal{N}(\mu_i, \sigma)  \quad Marginal
+$$
+
