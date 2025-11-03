@@ -82,7 +82,7 @@ plots
 
 ```{r, fig.height=7,fig.width=12}
 
-df1 = df %>% filter(!subject %in% c("16", "167")) %>% filter(cohort == "vmp1")
+df1 = df %>% filter(!subject %in% c("16", "167")) %>% filter(cohort == "vmp1") 
 
 df1$subject = as.numeric(as.factor(df1$subject))
 
@@ -104,6 +104,7 @@ datastan = list(N = nrow(df1),
                 ends = ends,
                 t_p_s = t_p_s$n,
                 X = df1$X,
+                X_scaled = (df1$X - mean(df1$X)) / sd(df1$X),
                 S_id = df1$subject,
                 RT = df1$RT,
                 ACC = df1$Correct,
@@ -115,10 +116,10 @@ datastan = list(N = nrow(df1),
 cor <-mod$sample(
   data = datastan,
   refresh = 10,
-  iter_sampling = 1000,
-  iter_warmup = 1000,
+  iter_sampling = 500,
+  iter_warmup = 500,
   adapt_delta = 0.99,
-  max_treedepth = 12,
+  max_treedepth = 13,
   init  = 0,
   parallel_chains = 4)
 
@@ -162,8 +163,8 @@ datastan = list(N = nrow(df1),
 cor <-mod$sample(
   data = datastan,
   refresh = 10,
-  iter_sampling = 1000,
-  iter_warmup = 1000,
+  iter_sampling = 500,
+  iter_warmup = 500,
   adapt_delta = 0.99,
   max_treedepth = 12,
   init  = 0,

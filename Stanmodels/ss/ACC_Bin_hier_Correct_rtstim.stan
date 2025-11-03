@@ -194,6 +194,7 @@ data {
   vector[N] Conf;
 
   vector[N] X;
+  vector[N] X_scaled;
 
   vector[S] minRT;
 
@@ -272,12 +273,10 @@ transformed parameters{
 
 }
 model {
-  gm[1] ~ normal(0,10); //global mean of beta
-  gm[2] ~ normal(-2,3); //global mean of beta
+  gm[1] ~ normal(0,5); //global mean of beta
+  gm[2] ~ normal(-2,2); //global mean of beta
   gm[3] ~ normal(-4,2); //global mean of beta
-  gm[4:7] ~ normal(0,3); //global mean of beta
-  gm[8] ~ normal(0,2); //global mean of beta
-  gm[9] ~ normal(0,2); //global mean of beta
+  gm[4:9] ~ normal(0,2); //global mean of beta
   gm[10] ~ normal(0,0.1); //global mean of beta
 
 
@@ -287,7 +286,7 @@ model {
   tau_u[1] ~ normal(3 , 3);
   tau_u[2] ~ normal(0 , 3);
   tau_u[3] ~ normal(0 , 3);
-  tau_u[4:9] ~ normal(0 , 3);
+  tau_u[4:9] ~ normal(0 , 2);
   tau_u[10] ~ normal(0 , 0.1);
 
   L_u ~ lkj_corr_cholesky(2);
@@ -300,11 +299,11 @@ model {
   for (n in 1:N) {
     u_mix[n, 1] = u[n,1];
 
-    u_mix[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n] + rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
+    u_mix[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n] + rt_stim[S_id[n]] * X_scaled[n], rt_prec[S_id[n]]);
 
     u_mix[n, 3] = ord_beta_reg_cdf(Conf[n] | logit(conf_mu[n]) + meta_bias[S_id[n]], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
 
-    target += lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
+    target += lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X_scaled[n], rt_prec[S_id[n]]);
 
     target += ord_beta_reg_lpdf(Conf[n] | logit(conf_mu[n])+ meta_bias[S_id[n]], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
 
@@ -342,7 +341,7 @@ generated quantities {
   for (n in 1:N) {
     u_mixx[n, 1] = u[n,1];
 
-    u_mixx[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
+    u_mixx[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X_scaled[n], rt_prec[S_id[n]]);
 
     u_mixx[n, 3] = ord_beta_reg_cdf(Conf[n] | logit(conf_mu[n])+ meta_bias[S_id[n]], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
   }
@@ -372,7 +371,7 @@ generated quantities {
 
   for(n in 1:N){
     log_lik_bin[n] = binomial_lpmf(binom_y[n] | 1, get_prob_cor(theta[n], X[n]));
-    log_lik_rt[n] = lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
+    log_lik_rt[n] = lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X_scaled[n], rt_prec[S_id[n]]);
     log_lik_conf[n] = ord_beta_reg_lpdf(Conf[n] | logit(conf_mu[n]) + meta_bias[S_id[n]], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
     log_lik[n] = log_lik_bin[n] + log_lik_rt[n] + log_lik_conf[n] + log_lik_cop[n];
   }
