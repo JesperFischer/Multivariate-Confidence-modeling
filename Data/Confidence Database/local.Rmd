@@ -1029,7 +1029,8 @@ df = df %>%
     subject = participant
   ) %>% 
   mutate(ConfidenceRT = NA) %>% 
-  mutate(Correct = ifelse(Correct,1,0))
+  mutate(Correct = ifelse(Correct,1,0)) %>% 
+  filter(RT < 8)
 
 
 df$subject = as.numeric(as.factor(df$subject))
@@ -1040,7 +1041,7 @@ df$subject = as.numeric(as.factor(df$subject))
 # bad subjects
 ```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
 remover(df)
-removers = c("S065","S076")
+removers = c(23,26)
 ```
 
 
@@ -1064,8 +1065,11 @@ lapply(list(c(11,13,15,17,5,10)), function(chunk) plot_subjects(df %>% filter(!s
 
 df1 = df %>% 
   filter(!subject %in% !subject %in% removers) %>% 
-  filter(subject %in% c("11","13","15","17","5","10")) %>% 
   filter(target_length != 400)
+
+  # filter(subject < 20) %>% 
+  # filter(subject %in% c("11","13","15","17","5","10")) %>% 
+
 
 df1$subject = as.numeric(as.factor(df1$subject))
 
@@ -1097,14 +1101,14 @@ datastan = list(N = nrow(df1),
 cor <-mod$sample(
   data = datastan,
   refresh = 10,
-  iter_sampling = 300,
-  iter_warmup = 300,
+  iter_sampling = 500,
+  iter_warmup = 500,
   adapt_delta = 0.95,
   max_treedepth = 12,
   # init  = 0,
   parallel_chains = 4)
 
-cor$save_object(here::here("Saved models","VMP_BA_ext_ses1.rds"))
+cor$save_object(here::here("Saved models","quad_testall.rds"))
 ```
 
 ```{r}

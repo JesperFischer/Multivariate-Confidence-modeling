@@ -103,8 +103,8 @@ functions {
     vector[S] beta = (param[,2]);
     vector[S] lapse = inv_logit(param[,3]) / 2;
 
-  vector[S] meta_un = param[,7];
-  vector[S] meta_bias = param[,8];
+    vector[S] meta_un = param[,7];
+    vector[S] meta_bias = param[,8];
 
 
 
@@ -317,7 +317,8 @@ model {
 
   to_vector(z_expo) ~ std_normal();
 
-  tau_u[1:8] ~ normal(0 , 3);
+  tau_u[1] ~ normal(10 , 10);
+  tau_u[2:8] ~ normal(0 , 3);
 
   L_u ~ lkj_corr_cholesky(2);
 

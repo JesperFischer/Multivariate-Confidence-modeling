@@ -105,6 +105,7 @@ plot_subjects <- function(df, subject_ids, bin = F) {
       theme_classic(base_size = 16)+
       labs(color = "Correct")+
       geom_vline(xintercept = 0, linetype = 2)+
+      # geom_hline(yintercept = 0.5, linetype = 2)+
       theme(legend.position = "top")
 
   }else{
@@ -156,6 +157,7 @@ plot_subjects <- function(df, subject_ids, bin = F) {
       theme_classic(base_size = 16) +
       labs(x = "X", color = "Correct") +
       geom_vline(xintercept = 0, linetype = 2) +
+      # geom_hline(yintercept = 0.5, linetype = 2)+
       theme(legend.position = "top")
   }
 

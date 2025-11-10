@@ -41,7 +41,7 @@ df = read_csv(here::here("Data","Confidence Database","Confidence Database","dat
 ```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
 remover(df)
 
-removers = c("23","88","141","212","221","338","343","445","456","484")
+removers = c("23","88","120","141","212","221","230","284","292","338","343","346","347","363","445","456","484")
 ```
 
 
@@ -58,13 +58,14 @@ plots
 
 ```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
 lapply(list(1:8), function(chunk) plot_subjects(df %>% filter(!subject %in% removers), chunk, bin = 7))
+lapply(list(9:20), function(chunk) plot_subjects(df %>% filter(!subject %in% removers), chunk, bin = 7))
 
 ```
 
 ```{r, fig.height=7,fig.width=12}
 
 df1 = df %>% filter(!subject %in% removers) %>% 
-  filter(subject < 100)
+  filter(subject < 21)
 
 df1$subject = as.numeric(as.factor(df1$subject))
 
