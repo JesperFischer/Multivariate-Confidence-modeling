@@ -47,14 +47,15 @@ df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>%
     RT = DecisionRT,
     subject = participant_id
   ) %>% 
-  mutate(Confidence = Confidence/100)
+  mutate(Confidence = Confidence/100,
+         resp = Y)
 
 ```
 
 # bad subjects
 ```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
-remover(df %>% filter(cohort == "vmp1"))
-removers_vmp1 = c("16","167")
+remover(df %>% filter(cohort == "vmp2"))
+removers_vmp2 = c("249","258","338","344","336","387","426","409","399")
 ```
 
 
@@ -68,7 +69,7 @@ plots
 
 ```{r, fig.height=7,fig.width=12}
 
-df1 = df %>% filter(!subject %in% c("16","167"))
+df1 = df %>% filter(!subject %in% removers_vmp2 & cohort == "vmp2")
 
 df1$subject = as.numeric(as.factor(df1$subject))
 
@@ -90,6 +91,7 @@ datastan = list(N = nrow(df1),
                 ends = ends,
                 t_p_s = t_p_s$n,
                 X = df1$X,
+                X_scaled = (df1$X - mean(df1$X)) / sd(df1$X),
                 S_id = df1$subject,
                 RT = df1$RT,
                 ACC = df1$Correct,
@@ -101,14 +103,131 @@ datastan = list(N = nrow(df1),
 cor <-mod$sample(
   data = datastan,
   refresh = 10,
-  iter_sampling = 1000,
-  iter_warmup = 1000,
-  adapt_delta = 0.99,
+  iter_sampling = 300,
+  iter_warmup = 300,
+  adapt_delta = 0.995,
   max_treedepth = 12,
   init  = 0,
   parallel_chains = 4)
 
-cor$save_object(here::here("Saved models","VMP_BA_int_ses1.rds"))
+cor$save_object(here::here("Saved models","VMP_BA_int_ses1_chrt2.rds"))
+
+
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","Pure","psycho.stan"))
+
+
+psy <-mod$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 500,
+  iter_warmup = 500,
+  adapt_delta = 0.90,
+  max_treedepth = 12,
+  init  = 0,
+  parallel_chains = 4)
+
+
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","Pure","psycho_rt.stan"))
+
+
+psyrt <-mod$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 500,
+  iter_warmup = 500,
+  adapt_delta = 0.90,
+  max_treedepth = 12,
+  init  = 0,
+  parallel_chains = 4)
+
+rt = psyrt$loo("log_lik_bin")
+psycho = psy$loo("log_lik_bin")
+full = cor$loo("log_lik_bin")
+
+loo::loo_compare(list(psy = psycho, full = full, rt = rt))
+
+full = cor$loo("log_lik_rt")
+rt = psyrt$loo("log_lik_rt")
+
+loo::loo_compare(list(full = full, rt = rt))
+
+full = cor$loo("log_lik")
+
+
+get_psychometric = function(fit, model){
+  
+  
+  as_draws_df(fit$draws(c("alpha","beta","lapse"))) %>% 
+    select(-contains(".")) %>%
+    mutate(draw = 1:n()) %>%
+    pivot_longer(-draw) %>%
+    extract(name, into = c("variable", "subject"),
+            regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE) %>% 
+    mutate(subject = as.factor(subject),
+           model = model)
+  
+}
+
+library(ggridges)
+library(ggh4x)
+rbind(
+  get_psychometric(psy, "normal"),
+  get_psychometric(psyrt, "rt"),
+  get_psychometric(cor, "confidence")
+) %>% 
+  ggplot(aes(y = subject, x = value, fill = model))+
+    geom_density_ridges(aes(y = subject, x = value),rel_min_height = 0.01, alpha = 0.5)+
+    facet_wrap(~variable, scales = "free")+
+    facetted_pos_scales(
+    x = list(
+      variable == "alpha"  ~ scale_x_continuous(limits = c(-40, 20), breaks = seq(-40, 10, 10)),
+      variable == "beta"   ~ scale_x_continuous(limits = c(-3, 1), breaks = seq(-3, 1, 1)),
+      variable == "lapse"  ~ scale_x_continuous(limits = c(0, 0.15), breaks = seq(0, 0.15, 0.05))
+    )
+  ) +
+  theme_classic(base_size = 16)
+
+
+get_copula = function(fit){
+  
+  df = as_draws_df(fit$draws(c("rho_p_rt","rho_p_conf","rho_rt_conf"))) %>% 
+    select(-contains(".")) %>%
+    mutate(draw = 1:n()) %>%
+    pivot_longer(-draw) %>%
+    extract(name, into = c("variable", "subject"),
+            regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE) %>% 
+    mutate(subject = as.factor(subject))
+  
+  group = df %>% group_by(variable,draw) %>% summarize(value = mean(value)) %>% mutate(subject = 0)
+  
+  return(list(df, group))
+}
+
+df = get_copula(cor)
+
+df[[1]] %>% 
+  ggplot(aes(y = subject, x = value))+
+    geom_density_ridges(aes(y = subject, x = value),rel_min_height = 0.01, alpha = 0.5)+
+    geom_density_ridges(data = df[[2]], aes(y = subject, x = value),rel_min_height = 0.01, alpha = 0.5, scale = 0.2, fill = "red")+
+    facet_wrap(~variable, scales = "free")+
+    facetted_pos_scales(
+    x = list(
+      variable == "alpha"  ~ scale_x_continuous(limits = c(-40, 20), breaks = seq(-40, 10, 10)),
+      variable == "beta"   ~ scale_x_continuous(limits = c(-3, 1), breaks = seq(-3, 1, 1)),
+
+            variable == "lapse"  ~ scale_x_continuous(limits = c(0, 0.15), breaks = seq(0, 0.15, 0.05))
+    )
+  ) +
+  geom_vline(xintercept = 0, linetype = 2)+
+  theme_classic(base_size = 16)
+
+
+plot_subjects(df1,18, bin = 7)
+df1 %>% filter(subject == 18) %>% ggplot(aes(x = Correct, y = Confidence))+geom_point()
+df1 %>% filter(subject == 22) %>% ggplot(aes(x = Correct, y = Confidence))+geom_point()
+df1 %>% filter(subject == 16) %>% ggplot(aes(x = RT, y = Confidence))+geom_point()
+df1 %>% filter(subject == 25) %>% ggplot(aes(x = RT, y = Confidence))+geom_point()+geom_smooth(method = "lm")
+cor.test(df1 %>% filter(subject == 25) %>% .$RT, df1 %>% filter(subject == 25) %>% .$Confidence)
 ```
 
 
@@ -247,34 +366,28 @@ Get_predictive = function(fit, df, n_draws, model = "hierarchical"){
 
 
 ```{r, fig.height=7,fig.width=12}
-preds = Get_predictive(cor,df1,20)
+df1$X_scaled = (df1$X - mean(df1$X)) / sd(df1$X)
 
-bin_pure = Plot_bin(preds,df1, ACC = T)
+preds = Get_predictive_ACC_hier(cor,df1,20)
 
-bin_pure[[1]]+ggtitle("pure")
-bin_pure[[2]]+ggtitle("pure")
+bin_pure = Plot_psychometric_ACC_hier(preds,df1)
 
-```
+bin_pure
 
-
-```{r, fig.height=7, fig.width=12}
-rt_pure = Plot_RT(preds,df1, bin = 7)
-rt_pure[[1]]+ggtitle("pure")
-rt_pure[[2]]+ggtitle("pure")
-rt_pure[[3]]+ggtitle("pure")
-
+Plot_psychometric_resp_hier(preds,df1)
 ```
 
 
 
 
-
-
 ```{r, fig.height=7, fig.width=12}
-conf_pure = Plot_conf(preds,df1, bin = 7)
-conf_pure[[1]]+ggtitle("pure")
-conf_pure[[2]]+ggtitle("pure")
+rt = Plot_RT_hier(preds,df1, bin = 7)
+rt
+```
 
+```{r, fig.height=7,fig.width=12}
+conf = Plot_Conf_ACC_hier(preds,df1, bin = 7)
+conf
 ```
 
 

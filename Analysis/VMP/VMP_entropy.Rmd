@@ -1,0 +1,330 @@
+---
+title: "VMP_extero"
+output: html_document
+date: "2025-10-13"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(tidyverse,posterior,tidybayes,cmdstanr, furrr,ordbetareg, future.apply, patchwork,purrr, bayesplot)
+
+
+invisible(
+  lapply(
+    list.files(here::here("Analysis", "Functions"), pattern = "\\.[Rr]$", full.names = TRUE),
+    source
+  )
+)
+```
+
+## R Markdown
+
+# Preprocesing
+
+```{r}
+df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>% 
+    mutate(DecisionRT = as.numeric(DecisionRT),
+           ConfidenceRT = as.numeric(ConfidenceRT),
+         Confidence = as.numeric(Confidence),
+         ResponseCorrect = as.numeric(ifelse(ResponseCorrect == "1",1,
+                                             ifelse(ResponseCorrect == "1.0",1,
+                                                    ifelse(ResponseCorrect == "True",1,
+                                                           ifelse(ResponseCorrect == "0",0,
+                                                                  ifelse(ResponseCorrect == "0.0",0,
+                                                                         ifelse(ResponseCorrect == "False",0,NA))))))),
+         Decision = ifelse(Decision == "More",1,ifelse(Decision == "Less",0,NA))) %>% 
+  mutate(participant_id = as.numeric(as.factor(participant_id))) %>%
+  filter(Modality == "Extero",
+         session == 1) %>% 
+  filter(DecisionRT < 8 & DecisionRT > 0.1)%>% 
+  select(ResponseCorrect,participant_id,DecisionRT,Decision, Confidence, ConfidenceRT, Alpha,cohort)  %>% drop_na() %>% 
+  rename(
+    Confidence = Confidence,
+    X  = Alpha,
+    Y = Decision,
+    Correct = ResponseCorrect,
+    RT = DecisionRT,
+    subject = participant_id
+  ) %>% 
+  mutate(Confidence = Confidence/100,
+         resp = Y)
+
+```
+
+# bad subjects
+```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
+remover(df %>% filter(cohort == "vmp1"))
+removers_vmp1 = c("16","167")
+
+
+remover(df %>% filter(cohort == "vmp2"))
+removers_vmp2 = c("233","263","275","300","298","326","397","495","470","546")
+
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(df %>% filter(cohort == "vmp1"& !subject %in% removers_vmp1) %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 10))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(cohort == "vmp1"), chunk, bin = 7))
+plots
+```
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+subs = unique(df %>% filter(cohort == "vmp2"& !subject %in% removers_vmp2) %>% .$subject)
+n_subj <- length(subs)
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 10))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df %>% filter(cohort == "vmp2") %>% mutate(subject = as.numeric(as.factor(subject))), chunk, bin = 7))
+plots
+```
+
+```{r, fig.width=10,fig.height=7}
+
+df1 =  df %>% filter(!subject %in% c("16", "167")) %>% filter(cohort == "vmp1") %>% 
+  mutate(X_scaled = (X - mean(X)) / sd(X))
+
+df1$subject = as.numeric(as.factor(df1$subject))
+
+t_p_s = df1 %>% group_by(subject) %>% summarize(n = n())
+
+
+ends <- cumsum(t_p_s$n)
+
+# Calculate the start points
+starts <- c(1, head(ends, -1) + 1)
+
+mod = cmdstan_model(here::here("Stanmodels","entropy","VMP_Resp_Bin_RT_Contin_Conf_metaun.stan"))
+# 
+vmp1 <- mod$sample(
+  data = list(N = nrow(df1),
+              S = length(unique(df1$subject)),
+              starts = starts,
+              minRT = unique(df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT),
+              ends = ends,
+              t_p_s = t_p_s$n,
+              X = df1$X,
+              X_scaled = df1$X_scaled,
+              ACC = df1$Correct,
+              S_id = df1$subject,
+              RT = df1$RT,
+              Conf = df1$Confidence,
+              binom_y = df1$Correct),
+  refresh = 10,
+  init = 0,
+  iter_sampling = 1000,
+  iter_warmup = 1000,
+  adapt_delta = 0.95,
+  parallel_chains = 4)
+
+vmp1$save_object(here::here("Saved models","VMP_extero_cohort1_meta_un_entropy.rds"))
+
+```
+
+```{r}
+df = qq %>% rename(subject = participant_id, X = Alpha, Y = Decision, RT = DecisionRT, Correct = ResponseCorrect)
+n_draws = 50
+workers = 20
+memory = 5000 * 1024^2
+
+parameters = c("alpha","beta","lapse","rt_int","rt_slope","rt_stim","rt_ndt","rt_prec",
+               "conf_int","conf_ACC","conf_entropy","conf_entropy_ACC","c0","c11","conf_prec",
+               "rho_p_rt","rho_p_conf","rho_rt_conf")
+
+
+df_param = as_draws_df(vmp2$draws(parameters)) %>% 
+  select(-contains(".")) %>% 
+  mutate(draw = 1:n()) %>% 
+        pivot_longer(-draw) %>% 
+        extract(name, into = c("variable", "subject"),
+                regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE)
+
+
+
+# First we select the number of workers and then the memory:
+plan(multisession, workers = workers)
+options(future.globals.maxSize = memory)
+
+#then the number of subjects
+subjects <- unique(df$subject)
+# and draws per subject
+draws <- 1:n_draws
+
+# Only use the number of draws that the user wants:
+dfq = df_param %>% filter(draw %in% draws)
+
+# function to get the draws (goes through subjects and then the draws)
+pred_list <- future_lapply(subjects, function(s) {
+  lapply(draws, function(d) {
+    
+    # extract parameter vectors (mu, phi, c0 and c1) for that draw and that subject
+    params <- dfq %>%
+      filter(subject == s, draw == d) %>%
+      select(variable, value) %>%
+      pivot_wider(names_from = "variable", values_from = "value")
+    
+    
+    data = df %>% filter(subject == s)
+    
+    psycho_ACC = function(x,alpha,beta,lapse){
+      lapse + (1 - 2 * lapse)*brms::inv_logit_scaled(beta*(x-alpha))
+    }
+    entropy = function(p){
+      -p * log(p) - (1-p) * log(1-p)
+    }
+    
+    x = data$X
+    prob = psycho_ACC(x, params$alpha, params$beta, params$lapse)
+    
+    bin_pred = rbinom(length(prob),1,prob)
+    
+    rt_mu = params$rt_int + params$rt_slope * entropy(prob) + params$rt_stim * x
+    rt_ndt = params$rt_ndt
+    
+    # apply inverse logit and scale
+    RT_pred = rlnorm(length(rt_mu),rt_mu,params$rt_prec)+rt_ndt
+          
+    
+    
+    conf_dat = data.frame(prob = prob) %>% 
+      rowwise() %>% 
+      mutate(ACC = list(c(0,1))) %>% unnest()
+    
+    conf_mu = params$conf_int +
+      params$conf_ACC * conf_dat$ACC +
+      params$conf_entropy * entropy(conf_dat$prob) +
+      params$conf_entropy_ACC * conf_dat$ACC * entropy(conf_dat$prob)
+  
+    # Collect the responses from the ordered beta
+    confidence_pred = data.frame()
+    for(i in 1:length(conf_mu)){
+      q = rordbeta(1, mu = brms::inv_logit_scaled(conf_mu[i]),
+                   phi = params$conf_prec,
+                   cutpoints = c(params$c0, params$c0 + exp(params$c11)))  
+      
+      dat = data.frame(pred = q, ACC = conf_dat$ACC[i])
+      
+      confidence_pred = rbind(confidence_pred, dat)
+    }
+    
+    confidence_pred =  confidence_pred %>% mutate(ACC = ifelse(ACC == 1, "Correct","Incorrect")) %>% 
+      pivot_wider(names_from = "ACC", values_from = pred) %>% unnest()
+    
+    predictions = confidence_pred %>% mutate(bin_pred = bin_pred, RT_pred = RT_pred,
+                                             x = x, draw = d, subject = s, prob = prob)
+    
+    return(predictions)
+  })
+},future.seed=TRUE)
+
+
+# flatten nested list and create a tidy long dataframe
+predictions = map_dfr(pred_list, bind_rows)
+```
+
+
+
+
+
+
+```{r, fig.height=7, fig.width=12}
+predictions %>% 
+  ggplot() +
+  geom_line(aes(x = x, y = prob, group = draw))+
+  geom_point(data = df %>% mutate(draw = NA), aes(x = X, y = Y, group = draw))+
+  facet_wrap(~subject, scales = "free") +
+  theme_classic(base_size = 16)+
+  theme(strip.background = element_blank(),
+        strip.text  = element_blank(),
+        axis.text  = element_blank(),
+        axis.ticks  = element_blank(),
+        axis.title  = element_blank())
+
+
+predictions %>% group_by(draw,subject) %>% summarize(p_correct = sum(bin_pred) / n()) %>% 
+  ggplot() +
+  geom_col(data = df %>% mutate(draw = NA) %>% group_by(subject) %>% summarize(p_correct = sum(Y) / n()),
+             aes(x = subject, y = p_correct))+
+  geom_point(aes(x = subject,y = p_correct, group = draw), position = position_dodge(width = 0.1), alpha = 0.5)+
+  theme_classic(base_size = 16)
+
+
+predictions %>% group_by(draw,subject) %>% mutate(ResponseCorrect = ifelse((x > 0 & bin_pred == 1), 1,
+                                                                                  ifelse((x < 0 & bin_pred == 0),1,0))) %>% 
+  summarize(p_correct = sum(ResponseCorrect) / n()) %>% 
+  ggplot() +
+  geom_col(data = df %>% mutate(draw = NA) %>% group_by(subject) %>% summarize(p_correct = sum(Correct) / n()),
+             aes(x = subject, y = p_correct))+
+  geom_point(aes(x = subject,y = p_correct, group = draw), position = position_dodge(width = 0.1), alpha = 0.5)+
+  theme_classic(base_size = 16)
+```
+
+
+```{r, fig.height=7, fig.width=12}
+predictions %>% 
+  ggplot() +
+  geom_line(aes(x = x, y = RT_pred, group = draw))+
+  geom_point(data = df %>% mutate(draw = NA), aes(x = X, y = RT, group = draw))+
+  facet_wrap(~subject, scales = "free") +
+  theme_classic(base_size = 16)+
+    theme(strip.background = element_blank(),
+        strip.text  = element_blank(),
+        axis.text  = element_blank(),
+        axis.ticks  = element_blank(),
+        axis.title  = element_blank())
+
+
+predictions %>% 
+  ggplot() +
+  geom_histogram(data = df %>% mutate(draw = NA),
+             aes(x = RT, y = after_stat(density)),
+             position = "identity",col = "black", alpha = 0.5)+
+  geom_density(aes(x = RT_pred, group = draw), alpha = 0.5)+
+  facet_wrap(~subject, scales = "free") +
+  theme_classic(base_size = 16)+
+    theme(strip.background = element_blank(),
+        strip.text  = element_blank(),
+        axis.text  = element_blank(),
+        axis.ticks  = element_blank(),
+        axis.title  = element_blank())
+
+```
+
+
+```{r, fig.height=7, fig.width=12}
+predictions %>% pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "ResponseCorrect") %>% 
+  ggplot() +
+  geom_line(aes(x = x, y = Confidence, col = (ResponseCorrect), group = interaction(ResponseCorrect,draw)))+
+  geom_point(data = df %>% mutate(draw = NA) %>% mutate(ResponseCorrect = ifelse(Correct == 1, "Correct","Incorrect")),
+             aes(x = X, y = Confidence / 100, col = (ResponseCorrect), group = interaction(ResponseCorrect,draw)))+
+  facet_wrap(~subject, scales = "free") +
+  theme_classic(base_size = 16)+
+    theme(strip.background = element_blank(),
+        strip.text  = element_blank(),
+        axis.text  = element_blank(),
+        axis.ticks  = element_blank(),
+        axis.title  = element_blank())
+
+
+
+predictions %>% 
+  pivot_longer(cols = c("Incorrect","Correct"), values_to = "Confidence",names_to = "ResponseCorrect") %>% 
+  ggplot() +
+  geom_histogram(data = df %>% mutate(draw = NA) %>% mutate(ResponseCorrect = ifelse(Correct == 1, "Correct","Incorrect")),
+             aes(x = Confidence / 100,y = after_stat(density), fill = ResponseCorrect),
+             position = "identity",col = "black", alpha = 0.5)+
+  geom_density(aes(x = Confidence, color = ResponseCorrect, group = interaction(ResponseCorrect,draw)), alpha = 0.5)+
+  facet_wrap(~subject, scales = "free") +
+  theme_classic(base_size = 16)+
+    theme(strip.background = element_blank(),
+        strip.text  = element_blank(),
+        axis.text  = element_blank(),
+        axis.ticks  = element_blank(),
+        axis.title  = element_blank())
+
+
+    
+```
