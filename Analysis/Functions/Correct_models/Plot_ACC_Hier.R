@@ -3,8 +3,11 @@
 library(tidyverse)
 library(posterior)
 library(brms)
-library(copula)
 library(future.apply)
+library(patchwork)
+
+# Source utility functions
+source(here::here("Analysis/Functions/Correct_models/utility.R"))
 
 # Function to generate posterior predictive samples
 Get_predictive_ACC_hier = function(fit, df, n_draws = 50) {
@@ -12,7 +15,7 @@ Get_predictive_ACC_hier = function(fit, df, n_draws = 50) {
   df$subject = as.numeric(as.factor(df$subject))
 
   workers = 7
-  memory = 10000 * 1024^2
+  memory = 25000 * 1024^2
 
   # Parameters in the model
   parameters = c("alpha", "beta", "lapse",
@@ -39,6 +42,7 @@ Get_predictive_ACC_hier = function(fit, df, n_draws = 50) {
   # Only use the number of draws that the user wants:
   dfq = df_param %>% filter(draw %in% draws)
 
+
   # Function to generate predictions per subject and draw
   pred_list <- future_lapply(subjects, function(s) {
     lapply(draws, function(d) {
@@ -53,6 +57,8 @@ Get_predictive_ACC_hier = function(fit, df, n_draws = 50) {
       x = data$X
       n_trials = length(x)
 
+      X_scaled = data$X_scaled
+
       # Get probability correct for each trial
       prob_faster = psycho(x, params$alpha, exp(params$beta), params$lapse)
       prob_cor = get_prob_cor(prob_faster, x)
@@ -66,19 +72,18 @@ Get_predictive_ACC_hier = function(fit, df, n_draws = 50) {
 
 
 
-      # Create correlation matrix from rho parameters
-      rho_matrix = matrix(c(1, params$rho_p_rt, params$rho_p_conf,
-                           params$rho_p_rt, 1, params$rho_rt_conf,
-                           params$rho_p_conf, params$rho_rt_conf, 1),
-                         nrow = 3, ncol = 3)
+      # Build correlation matrix from subject parameters
+      R = matrix(c(1, params$rho_p_rt, params$rho_p_conf,
+                   params$rho_p_rt, 1, params$rho_rt_conf,
+                   params$rho_p_conf, params$rho_rt_conf, 1), nrow = 3, byrow = TRUE)
 
-      # Sample from Gaussian copula
-      copula_obj = normalCopula(param = c(params$rho_p_rt,
-                                         params$rho_p_conf,
-                                         params$rho_rt_conf),
-                               dim = 3, dispstr = "un")
+      # Sample multivariate normals
+      z_samples = MASS::mvrnorm(n = n_trials, mu = rep(0, 3), Sigma = R)
 
-      u_samples = rCopula(n_trials, copula_obj)
+      # Transform to uniform [0,1] via standard normal CDF
+      u_samples = pnorm(z_samples)  # N x 3
+      # Transform uniforms to each marginal distribution
+
 
       # Transform uniforms to marginal distributions
       ACC_pred = rbinom(length(prob_cor),1,prob_cor)
@@ -86,7 +91,7 @@ Get_predictive_ACC_hier = function(fit, df, n_draws = 50) {
 
 
       # 2. RT (lognormal)
-      rt_mu = params$rt_int + params$rt_slope * entropy_t + params$rt_stim * x
+      rt_mu = params$rt_int + params$rt_slope * entropy_t + params$rt_stim * X_scaled
       RT_pred = qlnorm(u_samples[, 2], meanlog = rt_mu, sdlog = params$rt_prec) + params$rt_ndt
 
       # Calculate expected RT mean
@@ -104,21 +109,32 @@ Get_predictive_ACC_hier = function(fit, df, n_draws = 50) {
       conf_pred_correct = qordbeta(u_samples[, 3],
                                    mu = conf_mu_correct,
                                    phi = params$conf_prec,
-                                   c0 = params$c0,
-                                   c11 = params$c11)
+                                   cutzero = params$c0,
+                                   cutone = exp(params$c0) + params$c11)
 
+
+      # Add observed data for residual calculation
       predictions = data.frame(
         X = x,
         prob_cor = prob_cor,
         ACC_pred = ACC_pred,
-        prob_faster =prob_faster,
+        prob_faster = prob_faster,
         bin_pred = bin_pred,
         RT_pred = RT_pred,
         rt_mu = rt_mu_expected,
-
         conf_pred_correct = conf_pred_correct,
         conf_mu_correct = conf_mu_correct,
 
+        # Observed values
+        Y_obs = data$Y,
+        RT_obs = data$RT,
+        Correct_obs = data$Correct,
+        Confidence_obs = data$Confidence,
+
+        # Residuals (observed - predicted)
+        residual_Y = data$Correct - prob_cor,
+        residual_RT = data$RT - rt_mu_expected,
+        residual_Confidence = data$Confidence - conf_mu_correct,
 
         draw = d,
         subject = s
@@ -643,6 +659,177 @@ Plot_Conf_ACC_hier = function(predictions, df, bin = 7, draws = F) {
   }
 }
 
+Plot_residuals = function(predictions){
+
+  # Aggregate residuals by subject and X for plotting
+  residual_summary <- predictions %>%
+    group_by(subject, X) %>%
+    summarize(
+      mean_resid_Y = mean(residual_Y),
+      mean_resid_RT = mean(residual_RT),
+      q5_resid_Y = quantile(residual_Y,0.05),
+      q95_resid_Y = quantile(residual_Y,0.95),
+      q5_resid_RT = quantile(residual_RT,0.05),
+      q95_resid_RT = quantile(residual_RT,0.95),
+      .groups = "drop"
+    )
+
+  # Plot 1: Accuracy/Type-1 residuals
+  plot_resid_Y <- residual_summary %>%
+    ggplot(aes(x = X, y = mean_resid_Y)) +
+    geom_hline(yintercept = 0, linetype = 2, alpha = 0.5) +
+    geom_pointrange(aes(ymin = q5_resid_Y,
+                        ymax = q95_resid_RT),
+                    size = 0.3, alpha = 0.7) +
+    facet_wrap(~subject, scales = "free") +
+    labs(y = "Accuracy Residual", x = "Stimulus strength (X)",
+         title = "Subject-level Accuracy residuals") +
+    scale_y_continuous("Accuracy Residual", breaks = c(-0.5,0,0.5),labels = c(-0.5,0,0.5))+
+    theme_classic(base_size = 16) +
+    theme(
+      strip.background = element_blank(),
+      strip.text = element_blank(),
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank(),
+      axis.title = element_blank(),
+      legend.position = "top"
+    )
+  # Plot 2: RT residuals
+  plot_resid_RT <- residual_summary %>%
+    ggplot(aes(x = X, y = mean_resid_RT)) +
+    geom_hline(yintercept = 0, linetype = 2, alpha = 0.5) +
+    geom_pointrange(aes(ymin = q5_resid_RT,
+                        ymax = q95_resid_RT),
+                    size = 0.3, alpha = 0.7) +
+    facet_wrap(~subject, scales = "free") +
+    labs(y = "RT Residual", x = "Stimulus strength (X)",
+         title = "Subject-level RT residuals") +
+    scale_y_continuous("RT Residual", breaks = c(-0.5,0,0.5),labels = c(-0.5,0,0.5))+
+    theme_classic(base_size = 16) +
+    theme(
+      strip.background = element_blank(),
+      strip.text = element_blank(),
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank(),
+      axis.title = element_blank(),
+      legend.position = "top"
+    )
+
+
+  # Plot 3: Confidence residuals (split by Correct)
+  residual_conf_summary <- predictions %>%
+    group_by(subject, X, Correct_obs) %>%
+    summarize(
+      mean_resid_Conf = mean(residual_Confidence),
+      q5_resid_Conf = quantile(residual_Confidence,0.05),
+      q95_resid_Conf = quantile(residual_Confidence,0.95),
+      .groups = "drop"
+    ) %>%
+    mutate(Correct = ifelse(Correct_obs == 1, "Correct", "Incorrect"))
+
+  plot_resid_Conf <- residual_conf_summary %>%
+    ggplot(aes(x = X, y = mean_resid_Conf, color = Correct)) +
+    geom_hline(yintercept = 0, linetype = 2, alpha = 0.5) +
+    geom_pointrange(aes(ymin = q5_resid_Conf,
+                        ymax = q95_resid_Conf),
+                    size = 0.3, alpha = 0.7,
+                    position = position_dodge(width = 0.5)) +
+    facet_wrap(~subject, scales = "free") +
+    labs(x = "Stimulus strength (X)",
+         title = "Subject-level Confidence residuals",
+         color = "Accuracy") +
+    scale_y_continuous("Confidence Residual", breaks = c(-0.5,0,0.5),labels = c(-0.5,0,0.5))+
+    theme_classic(base_size = 16) +
+    theme(
+      strip.background = element_blank(),
+      strip.text = element_blank(),
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank(),
+      axis.title = element_blank(),
+      legend.position = "top"
+    )
+
+
+  # group
+  residual_summary_group <- predictions %>%
+    group_by(X) %>%
+    summarize(
+      mean_resid_Y = mean(residual_Y),
+      mean_resid_RT = mean(residual_RT),
+      q5_resid_Y = quantile(residual_Y,0.05),
+      q95_resid_Y = quantile(residual_Y,0.95),
+      q5_resid_RT = quantile(residual_RT,0.05),
+      q95_resid_RT = quantile(residual_RT,0.95),
+      .groups = "drop"
+    )
+
+  plot_resid_Y_group <- residual_summary_group %>%
+    ggplot(aes(x = X, y = mean_resid_Y)) +
+    geom_hline(yintercept = 0, linetype = 2, alpha = 0.5) +
+    geom_pointrange(aes(ymin = q5_resid_Y,
+                        ymax = q95_resid_RT),
+                    size = 0.3, alpha = 0.7) +
+    labs(y = "Accuracy Residual", x = "Stimulus strength (X)",
+         title = "Subject-level Accuracy residuals") +
+    scale_y_continuous("Accuracy Residual", breaks = c(-1,0,1),labels = c(-1,0,1))+
+    theme_classic(base_size = 16) +
+    theme(
+      legend.position = "top"
+    )
+
+  # Plot 2: RT residuals
+  plot_resid_RT_group <- residual_summary_group %>%
+    ggplot(aes(x = X, y = mean_resid_RT)) +
+    geom_hline(yintercept = 0, linetype = 2, alpha = 0.5) +
+    geom_pointrange(aes(ymin = q5_resid_RT,
+                        ymax = q95_resid_RT),
+                    size = 0.3, alpha = 0.7) +
+    labs(y = "RT Residual", x = "Stimulus strength (X)",
+         title = "Subject-level RT residuals") +
+    scale_y_continuous("RT Residual", breaks = c(-1,0,1),labels = c(-1,0,1))+
+    theme_classic(base_size = 16) +
+    theme(
+      legend.position = "top"
+    )
+
+
+
+  # Plot 3: Confidence residuals (split by Correct)
+  residual_conf_summary <- predictions %>%
+    group_by(X, Correct_obs) %>%
+    summarize(
+      mean_resid_Conf = mean(residual_Confidence),
+      q5_resid_Conf = quantile(residual_Confidence,0.05),
+      q95_resid_Conf = quantile(residual_Confidence,0.95),
+      .groups = "drop"
+    ) %>%
+    mutate(Correct = ifelse(Correct_obs == 1, "Correct", "Incorrect"))
+
+  plot_resid_Conf_group <- residual_conf_summary %>%
+    ggplot(aes(x = X, y = mean_resid_Conf, color = Correct)) +
+    geom_hline(yintercept = 0, linetype = 2, alpha = 0.5) +
+    geom_pointrange(aes(ymin = q5_resid_Conf,
+                        ymax = q95_resid_Conf),
+                    size = 0.3, alpha = 0.7,
+                    position = position_dodge(width = 0.5)) +
+    labs(x = "Stimulus strength (X)",
+         title = "Subject-level Confidence residuals",
+         color = "Accuracy") +
+    scale_y_continuous("Confidence Residual", breaks = c(-0.5,0,0.5),labels = c(-0.5,0,0.5))+
+    theme_classic(base_size = 16) +
+    theme(
+      legend.position = "top"
+    )
+
+  return(list(
+    accuracy = plot_resid_Y,
+    RT = plot_resid_RT,
+    confidence = plot_resid_Conf,
+    residual_summary = residual_summary,
+    residual_conf_summary = residual_conf_summary
+  ))
+}
+
 
 # Function to generate group-level predictions (average across subjects)
 Get_predictive_group = function(fit, df, n_draws = 50) {
@@ -650,7 +837,7 @@ Get_predictive_group = function(fit, df, n_draws = 50) {
   df$subject = as.numeric(as.factor(df$subject))
 
   workers = 7
-  memory = 10000 * 1024^2
+  memory = 25000 * 1024^2
 
   # Group-level parameters (from gm)
   parameters = c("alpha", "beta", "lapse",
@@ -696,64 +883,63 @@ Get_predictive_group = function(fit, df, n_draws = 50) {
 
     # Generate X values
     x = seq(-40, 40, by = 0.5)
+    n_trials = length(x)
+    X_scaled = (x - mean(df$X)) / sd(df$X)
 
-    # Probability correct
-    theta = psycho_ACC(x, params$alpha, exp(params$beta),
-                      brms::inv_logit_scaled(params$lapse) / 2)
-    prob_cor = get_prob_cor(theta, x)
+    # Get probability correct for each trial (using same approach as subject-level)
+    prob_faster = psycho(x, params$alpha, exp(params$beta), brms::inv_logit_scaled(params$lapse) / 2)
+    prob_cor = get_prob_cor(prob_faster, x)
 
     # Entropy for RT model
-    entropy_t = entropy(theta)
+    entropy_t = entropy(prob_faster)
 
-    # Confidence theta (with meta_un)
-    theta_conf = psycho(x, params$alpha, exp(params$beta + params$meta_un),
-                           brms::inv_logit_scaled(params$lapse) / 2)
+    # Theta for confidence (with meta_un)
+    prob_faster_conf = psycho(x, params$alpha, exp(params$beta + params$meta_un), brms::inv_logit_scaled(params$lapse) / 2)
 
     # Build correlation matrix from averaged copula parameters
-    cop = normalCopula(param = c(constants$rho_p_rt,
-                                 constants$rho_p_conf,
-                                 constants$rho_rt_conf),
-                      dim = 3, dispstr = "un")
+    R = matrix(c(1, constants$rho_p_rt, constants$rho_p_conf,
+                 constants$rho_p_rt, 1, constants$rho_rt_conf,
+                 constants$rho_p_conf, constants$rho_rt_conf, 1),
+               nrow = 3, byrow = TRUE)
 
-    # Generate correlated uniform samples using Gaussian copula
-    u_samples = rCopula(length(x), cop)
+    # Sample multivariate normals (same as subject-level code)
+    z_samples = MASS::mvrnorm(n = n_trials, mu = rep(0, 3), Sigma = R)
 
-    # Transform uniforms to each marginal distribution
+    # Transform to uniform [0,1] via standard normal CDF
+    u_samples = pnorm(z_samples)
 
-    # 1. Decision (accuracy) - whether response was correct
-    ACC_pred = as.numeric(u_samples[, 1] < prob_cor)
+    # Transform uniforms to marginal distributions
+    ACC_pred = rbinom(length(prob_cor), 1, prob_cor)
 
     # 2. RT (lognormal)
-    rt_mu = params$rt_int + params$rt_slope * entropy_t + params$rt_stim * x
+    rt_mu = params$rt_int + params$rt_slope * entropy_t + params$rt_stim * X_scaled
     RT_pred = qlnorm(u_samples[, 2], meanlog = rt_mu, sdlog = exp(params$rt_prec)) + constants$rt_ndt
 
-    # Expected RT mean
+    # Calculate expected RT mean
     rt_mu_expected = exp(rt_mu + exp(params$rt_prec)^2 / 2) + constants$rt_ndt
 
-    # 3. Confidence (ordered beta)
-    # Get confidence mean based on whether response was correct (ACC_pred)
-    conf_mu_raw = get_conf(ACC_pred, theta_conf, x, params$alpha)
-
+    # 3 Confidence mean (probability of getting it correct from confidence)
+    prob_cor_conf = get_conf(ACC_pred, prob_faster_conf, x, params$alpha)
 
     # Apply meta_bias in logit space
-    conf_mu_biased = brms::inv_logit_scaled(qlogis(conf_mu_raw) + params$meta_bias)
+    conf_mu_correct = brms::inv_logit_scaled(qlogis(prob_cor_conf) + params$meta_bias)
 
-    Conf_pred = qordbeta(u_samples[, 3],
-                        mu = conf_mu_logit,
-                        phi = params$conf_prec,
-                        c0 = constants$c0,
-                        c11 = constants$c11)
+    # Sample confidence values
+    conf_pred_correct = qordbeta(u_samples[, 3],
+                                mu = conf_mu_correct,
+                                phi = exp(params$conf_prec),
+                                cutzero = constants$c0,
+                                cutone = exp(constants$c0) + constants$c11)
 
     predictions = data.frame(
       X = x,
       Correct = ACC_pred,  # 1 if correct, 0 if incorrect
       prob = prob_cor,
       RT_pred = RT_pred,
-      conf_mu_actual = brms::inv_logit_scaled(conf_mu_logit),
-      conf_mu_biased = conf_mu_biased,
+      conf_mu_actual = conf_mu_correct,
       rt_mu = rt_mu_expected,
-      Confidence = Conf_pred,
-      theta = theta,
+      Confidence = conf_pred_correct,
+      prob_faster = prob_faster,
       draw = d
     )
 
@@ -766,7 +952,7 @@ Get_predictive_group = function(fit, df, n_draws = 50) {
 
 
 # Function to plot group-level predictions with ribbons
-Plot_group_predictive = function(predictions, df) {
+Plot_group_predictive_psycho = function(predictions, df) {
 
   # Prepare observed data
   dataq = bind_rows(
@@ -812,13 +998,13 @@ Plot_group_predictive = function(predictions, df) {
     predictions %>%
       group_by(X) %>%
       summarize(name = "Type-1",
-                mean = mean(prob),
-                q5 = quantile(prob, 0.05),
-                q10 = quantile(prob, 0.1),
-                q20 = quantile(prob, 0.2),
-                q95 = quantile(prob, 0.95),
-                q90 = quantile(prob, 0.90),
-                q80 = quantile(prob, 0.80),
+                mean = mean(prob_faster ),
+                q5 = quantile(prob_faster , 0.05),
+                q10 = quantile(prob_faster , 0.1),
+                q20 = quantile(prob_faster , 0.2),
+                q95 = quantile(prob_faster , 0.95),
+                q90 = quantile(prob_faster , 0.90),
+                q80 = quantile(prob_faster , 0.80),
                 .groups = "drop"),
 
     predictions %>%
@@ -848,7 +1034,64 @@ Plot_group_predictive = function(predictions, df) {
     filter(abs(X) < 25) %>%
     mutate(Correct = ifelse(Correct == 1, "Correct",ifelse(Correct == 0, "Incorrect",NA)))
 
-  # Plot 1: Expected means
+  # Calculate trial-level residuals properly
+  # For Type-1: observed Y vs predicted prob_faster (across draws, use mean prediction)
+  pred_mean_per_trial = predictions %>%
+    group_by(X) %>%
+    summarize(
+      pred_prob_faster = mean(prob_faster),
+      pred_rt = mean(rt_mu),
+      .groups = "drop"
+    )
+
+  # Join predictions to actual trial-level data
+  df_with_pred = df %>%
+    filter(abs(X) < 25) %>%
+    left_join(pred_mean_per_trial, by = "X") %>%
+    mutate(Correct_label = ifelse(Correct == 1, "Correct", "Incorrect"))
+
+  # Confidence predictions need to be split by Correct
+  pred_conf_per_trial = predictions %>%
+    group_by(X, Correct) %>%
+    summarize(pred_conf = mean(conf_mu_actual), .groups = "drop") %>%
+    mutate(Correct_label = ifelse(Correct == 1, "Correct", "Incorrect"))
+
+  df_with_pred = df_with_pred %>%
+    left_join(pred_conf_per_trial %>% select(X, Correct_label, pred_conf),
+              by = c("X", "Correct_label"))
+
+  # Calculate residuals at trial level, then aggregate
+  residuals_data = bind_rows(
+    df_with_pred %>%
+      mutate(residual = Y - pred_prob_faster,
+             name = "Type-1") %>%
+      group_by(X) %>%
+      summarize(residual_mean = mean(residual, na.rm = TRUE),
+                residual_se = sd(residual, na.rm = TRUE) / sqrt(n()),
+                name = first(name),
+                .groups = "drop"),
+
+    df_with_pred %>%
+      mutate(residual = RT - pred_rt,
+             name = "RT") %>%
+      group_by(X) %>%
+      summarize(residual_mean = mean(residual, na.rm = TRUE),
+                residual_se = sd(residual, na.rm = TRUE) / sqrt(n()),
+                name = first(name),
+                .groups = "drop"),
+
+    df_with_pred %>%
+      mutate(residual = Confidence - pred_conf,
+             name = "Confidence") %>%
+      group_by(X, Correct_label) %>%
+      summarize(residual_mean = mean(residual, na.rm = TRUE),
+                residual_se = sd(residual, na.rm = TRUE) / sqrt(n()),
+                name = first(name),
+                .groups = "drop") %>%
+      rename(Correct = Correct_label)
+  )
+
+  # Plot 1: Expected means (main plot)
   plot_mean = predictionsq_mean %>%
     ggplot() +
     geom_ribbon(aes(x = X, y = mean, ymin = q5, ymax = q95, fill = Correct), alpha = 0.1) +
@@ -857,27 +1100,48 @@ Plot_group_predictive = function(predictions, df) {
     geom_pointrange(data = dataq, aes(x = X, y = mean, ymin = q5, ymax = q95, fill = Correct),
                     shape = 21, color = "black", alpha = 0.5) +
     geom_line(aes(x = X, y = mean, color = Correct), linewidth = 1) +
-    facet_wrap(~name, scales = "free", ncol = 3) +
+    facet_wrap(~name, scales = "free_y", ncol = 3) +
     theme_classic(base_size = 16) +
     labs(color = "Correct", fill = "Correct",
-         title = "Group predictions (expected means)") +
+         title = "Group predictions (expected means)",
+         y = "Value") +
     geom_vline(xintercept = 0, linetype = 2) +
-    theme(legend.position = "top")
+    theme(legend.position = "top",
+          axis.title.x = element_blank(),
+          axis.text.x = element_blank())
 
-  plot_mean
+  # Plot 2: Residuals
+  plot_residuals = residuals_data %>%
+    ggplot(aes(x = X, y = residual_mean, color = Correct, fill = Correct)) +
+    geom_hline(yintercept = 0, linetype = 2, alpha = 0.5) +
+    geom_pointrange(aes(ymin = residual_mean - 2*residual_se,
+                        ymax = residual_mean + 2*residual_se),
+                    alpha = 0.5, size = 0.3) +
+    geom_smooth(method = "loess", se = TRUE, alpha = 0.2) +
+    facet_wrap(~name, scales = "free_y", ncol = 3) +
+    theme_classic(base_size = 16) +
+    labs(x = "Stimulus strength (X)", y = "Residual (Obs - Pred)") +
+    geom_vline(xintercept = 0, linetype = 2) +
+    theme(legend.position = "none")
+
+  # Combine plots using patchwork
+  combined_plot = plot_mean / plot_residuals +
+    plot_layout(heights = c(2, 1))
+
+  combined_plot
 
   # Prepare predicted data (using actual samples)
   predictionsq_preds = bind_rows(
     predictions %>%
       group_by(X) %>%
       summarize(name = "Type-1",
-                mean = mean(prob),
-                q5 = quantile(prob, 0.05),
-                q10 = quantile(prob, 0.1),
-                q20 = quantile(prob, 0.2),
-                q95 = quantile(prob, 0.95),
-                q90 = quantile(prob, 0.90),
-                q80 = quantile(prob, 0.80),
+                mean = mean(prob_faster ),
+                q5 = quantile(prob_faster , 0.05),
+                q10 = quantile(prob_faster , 0.1),
+                q20 = quantile(prob_faster , 0.2),
+                q95 = quantile(prob_faster , 0.95),
+                q90 = quantile(prob_faster , 0.90),
+                q80 = quantile(prob_faster , 0.80),
                 .groups = "drop"),
 
     predictions %>%
@@ -923,8 +1187,13 @@ Plot_group_predictive = function(predictions, df) {
          title = "Group predictions (posterior predictive samples)") +
     geom_vline(xintercept = 0, linetype = 2) +
     theme(legend.position = "top")
-  plot_preds
-  return(list(plot_mean = plot_mean, plot_preds = plot_preds))
+
+  return(list(
+    plot_combined = combined_plot,
+    plot_mean = plot_mean,
+    plot_residuals = plot_residuals,
+    plot_preds = plot_preds
+  ))
 }
 
 

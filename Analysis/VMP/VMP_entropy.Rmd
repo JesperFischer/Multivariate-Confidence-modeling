@@ -85,7 +85,7 @@ plots
 ```{r, fig.width=10,fig.height=7}
 
 df1 =  df %>% filter(!subject %in% c("16", "167")) %>% filter(cohort == "vmp1") %>% 
-  mutate(X_scaled = (X - mean(X)) / sd(X))
+  mutate(X_scaled = (X - mean(X)) / sd(X)) %>% filter(subject < 100)
 
 df1$subject = as.numeric(as.factor(df1$subject))
 
@@ -97,7 +97,7 @@ ends <- cumsum(t_p_s$n)
 # Calculate the start points
 starts <- c(1, head(ends, -1) + 1)
 
-mod = cmdstan_model(here::here("Stanmodels","entropy","VMP_Resp_Bin_RT_Contin_Conf_metaun.stan"))
+mod = cmdstan_model(here::here("Stanmodels","entropy","VMP_Resp_Bin_RT_Contin_Conf_metaun_rt_un.stan"))
 # 
 vmp1 <- mod$sample(
   data = list(N = nrow(df1),

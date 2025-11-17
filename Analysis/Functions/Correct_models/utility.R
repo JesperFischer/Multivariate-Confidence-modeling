@@ -27,24 +27,33 @@ get_prob_cor = function(theta, x) {
 }
 
 
-# Helper function for ordered beta inverse CDF
-qordbeta = function(p, mu, phi, c0, c11) {
-  cutpoints = c(c0, c0 + exp(c11))
+qordbeta <- function(p, mu, phi, cutzero, cutone) {
 
-  # Probability of 0
-  p0 = 1 - brms::inv_logit_scaled(mu - cutpoints[1])
-  # Probability of 1
-  p1 = brms::inv_logit_scaled(mu - cutpoints[2])
-  # Probability of middle region
-  pm = brms::inv_logit_scaled(mu - cutpoints[1]) - brms::inv_logit_scaled(mu - cutpoints[2])
+  # ensure p and mu are same length
+  n <- max(length(p), length(mu))
+  p  <- rep(p,  length.out = n)
+  mu <- rep(mu, length.out = n)
 
-  # Beta parameters for middle region
-  mu_beta = brms::inv_logit_scaled(mu)
-  alpha_beta = mu_beta * phi
-  beta_beta = (1 - mu_beta) * phi
+  # Beta parameters
+  alpha <- mu * phi
+  beta  <- (1 - mu) * phi
 
-  # Inverse CDF
-  ifelse(p < p0, 0,
-         ifelse(p > (1 - p1), 1,
-                qbeta((p - p0) / pm, alpha_beta, beta_beta)))
+  # mixture weights (logistic cutpoints)
+  p0    <- plogis(cutzero)            # mass at 0
+  p1    <- 1 - plogis(cutone)         # mass at 1
+  p_mid <- 1 - p0 - p1                # mass in (0,1)
+
+  # initialize output
+  y <- numeric(n)
+
+  # regions
+  y[p < p0] <- 0
+  y[p > (1 - p1)] <- 1
+
+  # continuous region: rescale p to (0,1)
+  idx <- p >= p0 & p <= (1 - p1)
+  p_rescaled <- (p[idx] - p0) / p_mid
+  y[idx] <- qbeta(p_rescaled, alpha[idx], beta[idx])
+
+  return(y)
 }

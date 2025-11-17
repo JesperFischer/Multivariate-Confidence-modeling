@@ -1,10 +1,9 @@
 functions {
 
 
-  real psycho(real x, real alpha, real beta, real lapse){
-   return (lapse + (1 - 2 * lapse) * (inv_logit(beta*(x-alpha))));
-  }
-
+  real psycho_ACC(real x, real alpha, real beta, real lapse){
+    return (lapse + (1-2*lapse) * inv_logit(beta * (x - alpha)));
+   }
   real entropy(real p){
     return(-p * log(p) - (1-p) * log(1-p));
   }
@@ -42,6 +41,7 @@ functions {
 
 
 
+
   matrix uvar_bounds(array[] int binom_y, vector gm, vector tau_u,matrix L_u, matrix z_expo, array[] int S_id, vector X,
                      int is_upper) {
     int N = size(binom_y);
@@ -64,11 +64,8 @@ functions {
     vector[S] beta = (param[,2]);
     vector[S] lapse = inv_logit(param[,3]) / 2;
 
-
-
-
     for (n in 1:N) {
-      real theta = psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]);
+      real theta = get_prob_cor(psycho_ACC(X[n], (alpha[S_id[n]]), exp(beta[S_id[n]]), lapse[S_id[n]]), X[n]);
       if (is_upper == 0) {
         u_bounds[n, 1] = binom_y[n] == 0.0
                           ? 0.0 : binomial_cdf(binom_y[n] - 1 | 1, theta);
@@ -79,6 +76,7 @@ functions {
 
     return u_bounds;
   }
+
 
 
   real ord_beta_reg_cdf(real y, real mu, real phi, real cutzero, real cutone) {
@@ -156,8 +154,31 @@ functions {
       return(0);
     }
   }
-}
 
+  real get_conf(real ACC, real theta, real x, real alpha){
+  if(ACC == 1 && x > alpha){
+    return(theta);
+  }else if(ACC == 1 && x < alpha){
+    return(1-theta);
+  }else if(ACC == 0 && x > alpha){
+    return(1-theta);
+  }else if(ACC == 0 && x < alpha){
+    return(theta);
+  }else{
+    return(0);
+  }
+}
+  real get_prob_cor(real theta, real x){
+  if(x > 0){
+    return(theta);
+  }else if(x < 0){
+    return(1-theta);
+  }else{
+    return(0);
+  }
+
+}
+}
 
 
 data {
@@ -173,17 +194,16 @@ data {
   vector[N] Conf;
 
   vector[N] X;
+  vector[N] X_scaled;
 
   vector[S] minRT;
 
   vector[N] ACC; // Vector of deltaBPM values that match the binary response
 
-  array[S] int t_p_s;
-
-
 }
+
 transformed data{
-  int P = 14;
+  int P = 7;
 }
 
 parameters {
@@ -200,7 +220,7 @@ parameters {
 
   // cholesky_factor_corr[2] rho_chol;
 
-  array[S] cholesky_factor_corr[3] rho_chol;
+  array[S] cholesky_factor_corr[2] rho_chol;
 
   vector[S] c0;
   vector[S] c11;
@@ -210,7 +230,7 @@ parameters {
 
 transformed parameters{
 
-   // Extracting individual deviations for each subject for each parameter
+  // Extracting individual deviations for each subject for each parameter
   matrix[S, P] indi_dif = (diag_pre_multiply(tau_u, L_u) * z_expo)';
 
   matrix[S, P] param;
@@ -229,60 +249,34 @@ transformed parameters{
   vector[S] rt_stim = param[,7];
 
 
-  vector[S] conf_int = param[,8];
-  vector[S] conf_ACC = param[,9];
-  vector[S] conf_entropy = param[,10];
-  vector[S] conf_entropy_ACC = param[,11];
-  vector[S] conf_prec = exp(param[,12]);
-
-
-  vector[S] meta_un = param[,13];
-
-  vector[S] rt_un = param[,14];
-
-
-
   vector[N] entropy_t;
-
-  vector[N] entropy_conf;
-
-  vector[N] conf_mu;
   vector[N] theta;
 
   profile("likelihood") {
   for (n in 1:N) {
-  theta[n] = psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]]), lapse[S_id[n]]);
+  theta[n] = psycho_ACC(X[n], (alpha[S_id[n]]), exp(beta[S_id[n]]), lapse[S_id[n]]);
 
-  entropy_t[n] = entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]] + rt_un[S_id[n]]), lapse[S_id[n]]));
-
-  entropy_conf[n] = entropy(psycho(X[n], alpha[S_id[n]], exp(beta[S_id[n]] + meta_un[S_id[n]]), lapse[S_id[n]]));
-
-  conf_mu[n] = conf_int[S_id[n]] +                                           // intercept
-    conf_ACC[S_id[n]] * ACC[n] +                                  // main effect: ACC
-    conf_entropy[S_id[n]] * entropy_conf[n] +                        // main effect: entropy
-    conf_entropy_ACC[S_id[n]] * ACC[n] * entropy_conf[n];                 // 2-way interaction: ACC × entropy
+  entropy_t[n] = entropy(psycho_ACC(X[n], (alpha[S_id[n]]), exp(beta[S_id[n]]), lapse[S_id[n]]));
+  }
   }
 
-  }
 }
-
 model {
-
-  gm[1] ~ normal(0,10); //global mean of beta
-  gm[2] ~ normal(-1,3); //global mean of beta
+  gm[1] ~ normal(0,5); //global mean of beta
+  gm[2] ~ normal(-2,2); //global mean of beta
   gm[3] ~ normal(-4,2); //global mean of beta
-  gm[4:6] ~ normal(0,5); //global mean of beta
+  gm[4:6] ~ normal(0,2); //global mean of beta
   gm[7] ~ normal(0,0.1); //global mean of beta
-  gm[8:12] ~ normal(0,5); //global mean of beta
-  gm[13:14] ~ normal(0,3); //global mean of beta
+
+
 
   to_vector(z_expo) ~ std_normal();
 
   tau_u[1] ~ normal(3 , 3);
-  tau_u[2:6] ~ normal(0 , 3);
+  tau_u[2] ~ normal(0 , 3);
+  tau_u[3] ~ normal(0 , 3);
+  tau_u[4:6] ~ normal(0 , 2);
   tau_u[7] ~ normal(0 , 0.1);
-  tau_u[8:12] ~ normal(0 , 3);
-  tau_u[13:14] ~ normal(0 , 1);
 
   L_u ~ lkj_corr_cholesky(2);
 
@@ -290,20 +284,13 @@ model {
 
 
 
-  matrix[N, 3] u_mix;
+  matrix[N, 2] u_mix;
   for (n in 1:N) {
     u_mix[n, 1] = u[n,1];
 
-    u_mix[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n] + rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
+    u_mix[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n] + rt_stim[S_id[n]] * X_scaled[n], rt_prec[S_id[n]]);
 
-    u_mix[n, 3] = ord_beta_reg_cdf(Conf[n] | conf_mu[n], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
-
-    target += lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
-
-    target += ord_beta_reg_lpdf(Conf[n] | conf_mu[n], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
-
-    // target += binomial_lpmf(binom_y[n] | 1, theta[n]);
-
+    target += lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X_scaled[n], rt_prec[S_id[n]]);
 
   }
 
@@ -316,34 +303,35 @@ model {
 
     u_mix[starts[s]:ends[s],] ~ gauss_copula_cholesky(rho_chol[s]);
   }
+
 }
 
 generated quantities {
+
+ vector[S] c1 = c0 + exp(c11);
   vector[S] rho_p_rt;
-  vector[S] rho_p_conf;
-  vector[S] rho_rt_conf;
 
   matrix[P,P] correlation_matrix = L_u * L_u';
 
   vector[N] log_lik_bin = rep_vector(0,N);
   vector[N] log_lik_rt = rep_vector(0,N);
-  vector[N] log_lik_conf = rep_vector(0,N);
   vector[N] log_lik = rep_vector(0,N);
 
- matrix[N, 3] u_mixx;
+
+
+ matrix[N, 2] u_mixx;
   for (n in 1:N) {
     u_mixx[n, 1] = u[n,1];
 
-    u_mixx[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n] + rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
+    u_mixx[n, 2] = lognormal_cdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X_scaled[n], rt_prec[S_id[n]]);
 
-    u_mixx[n, 3] = ord_beta_reg_cdf(Conf[n] | conf_mu[n], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
   }
 
   vector[N] log_lik_cop;
   int pos;
   pos = 1;
   for (s in 1:S) {
-    int n_s = ends[s]-starts[s] + 1;
+    int n_s = ends[s] - starts[s] + 1;
     vector[n_s] log_lik_s;
 
     log_lik_s = gauss_copula_cholesky_per_row(u_mixx[starts[s]:ends[s], ], rho_chol[s]);
@@ -357,18 +345,14 @@ generated quantities {
   for(s in 1:S){
 
     rho_p_rt[s] = multiply_lower_tri_self_transpose(rho_chol[s])[1, 2];
-    rho_p_conf[s] = multiply_lower_tri_self_transpose(rho_chol[s])[1, 3];
-    rho_rt_conf[s] = multiply_lower_tri_self_transpose(rho_chol[s])[2, 3];
 
   }
 
   for(n in 1:N){
-    log_lik_bin[n] = binomial_lpmf(binom_y[n] | 1, theta[n]);
-    log_lik_rt[n] = lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X[n], rt_prec[S_id[n]]);
-    log_lik_conf[n] = ord_beta_reg_lpdf(Conf[n] | conf_mu[n], conf_prec[S_id[n]], c0[S_id[n]], c11[S_id[n]]);
-    log_lik[n] = log_lik_bin[n] + log_lik_rt[n] + log_lik_conf[n] + log_lik_cop[n];
+    log_lik_bin[n] = binomial_lpmf(binom_y[n] | 1, get_prob_cor(theta[n], X[n]));
+    log_lik_rt[n] = lognormal_lpdf(RT[n] - rt_ndt[S_id[n]] | rt_int[S_id[n]] + rt_slope[S_id[n]] * entropy_t[n]+ rt_stim[S_id[n]] * X_scaled[n], rt_prec[S_id[n]]);
+    log_lik[n] = log_lik_bin[n] + log_lik_rt[n] + log_lik_cop[n];
   }
-
 
 
 
