@@ -59,7 +59,7 @@ removers_vmp1 = c("16","167")
 
 
 remover(df %>% filter(cohort == "vmp2"))
-removers_vmp2 = c("233","263","275","300","298","326","397","495","470","546")
+removers_vmp2 = c("233","258","263","270","275","287","288","298","300","313","326","346","298","326","397","448","495","470","546")
 
 ```
 
@@ -84,6 +84,7 @@ plots
 ```{r, fig.height=7,fig.width=12}
 
 df1 = df %>% filter(!subject %in% c("16", "167")) %>% filter(cohort == "vmp1") %>% 
+  filter(subject < 50) %>% 
   mutate(X_scaled = (X - mean(X)) / sd(X))
 
 df1$subject = as.numeric(as.factor(df1$subject))
@@ -115,6 +116,7 @@ datastan = list(N = nrow(df1),
                 binom_y = df1$Correct)
 
 
+
 cor <-mod$sample(
   data = datastan,
   refresh = 10,
@@ -125,54 +127,27 @@ cor <-mod$sample(
   init  = 0,
   parallel_chains = 4)
 
-cor$save_object(here::here("Saved models","VMP_BA_ext_ses1_cohort1.rds"))
+cor$save_object(here::here("Saved models","VMP_BA_ext_ses1_cohort1_s_50.rds"))
 
 
+mod = cmdstan_model(here::here("Stanmodels","ss","lapse_free","lapse_free_full.stan"))
 
 
-
-
-df1 = df %>% filter(!subject %in% removers_vmp2 )%>% filter(cohort == "vmp2")
-
-df1$subject = as.numeric(as.factor(df1$subject))
-
-t_p_s = df1 %>% group_by(subject) %>% summarize(n = n())
-
-
-ends <- cumsum(t_p_s$n)
-
-# Calculate the start points
-starts <- c(1, head(ends, -1) + 1)
-
-# mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
-mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct_rtstim.stan"))
-
-datastan = list(N = nrow(df1),
-                S = length(unique(df1$subject)),
-                starts = starts,
-                minRT = df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT,
-                ends = ends,
-                t_p_s = t_p_s$n,
-                X = df1$X,
-                S_id = df1$subject,
-                RT = df1$RT,
-                ACC = df1$Correct,
-                K = length(unique(df1$Confidence)),
-                Conf = df1$Confidence,
-                binom_y = df1$Correct)
-
-
-cor <-mod$sample(
+compar <-mod$sample(
   data = datastan,
   refresh = 10,
   iter_sampling = 500,
   iter_warmup = 500,
   adapt_delta = 0.99,
-  max_treedepth = 12,
+  max_treedepth = 13,
   init  = 0,
   parallel_chains = 4)
 
-cor$save_object(here::here("Saved models","VMP_BA_ext_ses1_cohort2.rds"))
+compar$save_object(here::here("Saved models","lapse_free_VMP_ext_ses1_cohort1_s_50.rds"))
+
+
+
+
 ```
 
 
@@ -208,9 +183,15 @@ conf
 
 ```{r, fig.height=7,fig.width=12, warning=FALSE}
 
-predictions = Get_predictive_group(fit,df1,2000)
+predictions = Get_predictive_group(fit ,df1,10)
 
-Plot_group_predictive_psycho(predictions, df1)
+plots = Plot_group_predictive_psycho(predictions, df1)
+
+plots
+
+
+ggsave(here::here("Extero_VMP1_marginal_means.tiff"), plots$plot_combined, dpi = 100, width = 12, height = 8)
+
 
 ```
 
@@ -263,34 +244,238 @@ ggplot(df_summary, aes(y = subject, x = mean)) +
 
 
 ```{r}
-mod1 = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","SS_ent_compar.stan"))
 
-datastan = list(N = nrow(df1),
-                binom_y = df1$Correct,
-                RT = df1$RT,
-                X = abs(df1$X),
-                ACC = df1$Correct,
-                Conf = df1$Confidence,
-                minRT = min(df1$RT)
-              )
-ent <-mod1$sample(
-  data = datastan,
-  refresh = 10,
-  iter_sampling = 500,
-  iter_warmup = 500,
-  adapt_delta = 0.95,
-  max_treedepth = 12,
-  init  = 0,
-  parallel_chains = 4)
+get_psychometric = function(fit, model){
+  
+  
+  as_draws_df(fit$draws(c("meta_un","meta_bias"))) %>% 
+    select(-contains(".")) %>%
+    mutate(draw = 1:n()) %>%
+    pivot_longer(-draw) %>%
+    extract(name, into = c("variable", "subject"),
+            regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE) %>% 
+    mutate(subject = as.factor(subject),
+           model = model)
+  
+}
 
+library(ggridges)
+library(ggh4x)
 
+# get_psychometric(fit, "confidence")%>% 
+#     ggplot(aes(y = subject, x = value))+
+#     geom_density_ridges(aes(y = subject, x = value),rel_min_height = 0.01, alpha = 0.5)+
+#     facet_wrap(~variable, scales = "free")+
+#     facetted_pos_scales(
+#         x = list(
+#             variable == "alpha"  ~ scale_x_continuous(limits = c(-10, 10), breaks = seq(-10, 10, 5)),
+#             variable == "beta"   ~ scale_x_continuous(limits = c(0, 0.7), breaks = seq(0, 0.7, 0.2)),
+#             variable == "lapse"  ~ scale_x_continuous(limits = c(0, 0.5), breaks = seq(0, 0.5, 0.1))
+#         )
+#     ) +
+#     theme_classic(base_size = 16)
 
+df_summary = get_psychometric(fit, "confidence") %>%
+  group_by(variable, subject) %>%
+  summarise(mean = mean(value),
+            lower = quantile(value, 0.05),
+            upper = quantile(value, 0.95),
+            .groups = "drop")
 
-
+ggplot(df_summary, aes(y = subject, x = mean)) +
+  geom_pointrange(aes(xmin = lower, xmax = upper), fatten = 0.5) +
+  facet_wrap(~variable, scales = "free_x") +
+  theme_classic(base_size = 14)+
+  theme(axis.ticks.y = element_blank(),
+        axis.text.y = element_blank())
 
 
 
 ```
+## vmp2 
+
+```{r}
+df1 = df %>% filter(!subject %in% removers_vmp2 )%>% filter(cohort == "vmp2")%>% 
+  mutate(X_scaled = (X - mean(X)) / sd(X))
+
+df1$subject = as.numeric(as.factor(df1$subject))
+
+t_p_s = df1 %>% group_by(subject) %>% summarize(n = n())
 
 
+ends <- cumsum(t_p_s$n)
+
+# Calculate the start points
+starts <- c(1, head(ends, -1) + 1)
+
+# mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct_rtstim.stan"))
+
+datastan = list(N = nrow(df1),
+                S = length(unique(df1$subject)),
+                starts = starts,
+                minRT = df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT,
+                ends = ends,
+                t_p_s = t_p_s$n,
+                X = df1$X,
+                S_id = df1$subject,
+                RT = df1$RT,
+                ACC = df1$Correct,
+                K = length(unique(df1$Confidence)),
+                Conf = df1$Confidence,
+                binom_y = df1$Correct)
+
+
+cor <-mod$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 500,
+  iter_warmup = 500,
+  adapt_delta = 0.99,
+  max_treedepth = 12,
+  init  = 0,
+  parallel_chains = 4)
+
+# cor$save_object(here::here("Saved models","VMP_BA_ext_ses1_cohort2.rds"))
+```
+
+
+
+
+```{r, fig.height=7,fig.width=12}
+preds = Get_predictive_ACC_hier(fit,df1,20)
+
+bin_pure = Plot_psychometric_ACC_hier(preds,df1)
+
+bin_pure
+
+Plot_psychometric_resp_hier(preds,df1)
+```
+
+
+
+
+
+
+```{r, fig.height=7, fig.width=12, warning=FALSE}
+rt = Plot_RT_hier(preds,df1, bin = 7)
+rt
+```
+
+```{r, fig.height=7,fig.width=12, warning=FALSE}
+conf = Plot_Conf_ACC_hier(preds,df1, bin = 7)
+conf
+```
+
+
+
+```{r, fig.height=7,fig.width=12, warning=FALSE}
+
+predictions = Get_predictive_group(fit,df1,2000)
+
+plots = Plot_group_predictive_psycho(predictions, df1)
+
+plots
+
+
+ggsave(here::here("Extero_VMP2_marginal_means.tiff"), plots$plot_combined, dpi = 100, width = 12, height = 8)
+
+```
+
+
+```{r}
+
+get_psychometric = function(fit, model){
+  
+  
+  as_draws_df(fit$draws(c("alpha","beta","lapse"))) %>% 
+    select(-contains(".")) %>%
+    mutate(draw = 1:n()) %>%
+    pivot_longer(-draw) %>%
+    extract(name, into = c("variable", "subject"),
+            regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE) %>% 
+    mutate(subject = as.factor(subject),
+           model = model)
+  
+}
+
+library(ggridges)
+library(ggh4x)
+
+# get_psychometric(fit, "confidence")%>% 
+#     ggplot(aes(y = subject, x = value))+
+#     geom_density_ridges(aes(y = subject, x = value),rel_min_height = 0.01, alpha = 0.5)+
+#     facet_wrap(~variable, scales = "free")+
+#     facetted_pos_scales(
+#         x = list(
+#             variable == "alpha"  ~ scale_x_continuous(limits = c(-10, 10), breaks = seq(-10, 10, 5)),
+#             variable == "beta"   ~ scale_x_continuous(limits = c(0, 0.7), breaks = seq(0, 0.7, 0.2)),
+#             variable == "lapse"  ~ scale_x_continuous(limits = c(0, 0.5), breaks = seq(0, 0.5, 0.1))
+#         )
+#     ) +
+#     theme_classic(base_size = 16)
+
+df_summary = get_psychometric(fit, "confidence") %>%
+  group_by(variable, subject) %>%
+  summarise(mean = mean(value),
+            lower = quantile(value, 0.05),
+            upper = quantile(value, 0.95),
+            .groups = "drop")
+
+ggplot(df_summary, aes(y = subject, x = mean)) +
+  geom_pointrange(aes(xmin = lower, xmax = upper), fatten = 0.5) +
+  facet_wrap(~variable, scales = "free_x") +
+  theme_classic(base_size = 14)
+
+```
+
+```{r}
+
+get_psychometric = function(fit, model){
+  
+  
+  as_draws_df(fit$draws(c("meta_un","meta_bias"))) %>% 
+    select(-contains(".")) %>%
+    mutate(draw = 1:n()) %>%
+    pivot_longer(-draw) %>%
+    extract(name, into = c("variable", "subject"),
+            regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE) %>% 
+    mutate(subject = as.factor(subject),
+           model = model)
+  
+}
+
+library(ggridges)
+library(ggh4x)
+
+# get_psychometric(fit, "confidence")%>% 
+#     ggplot(aes(y = subject, x = value))+
+#     geom_density_ridges(aes(y = subject, x = value),rel_min_height = 0.01, alpha = 0.5)+
+#     facet_wrap(~variable, scales = "free")+
+#     facetted_pos_scales(
+#         x = list(
+#             variable == "alpha"  ~ scale_x_continuous(limits = c(-10, 10), breaks = seq(-10, 10, 5)),
+#             variable == "beta"   ~ scale_x_continuous(limits = c(0, 0.7), breaks = seq(0, 0.7, 0.2)),
+#             variable == "lapse"  ~ scale_x_continuous(limits = c(0, 0.5), breaks = seq(0, 0.5, 0.1))
+#         )
+#     ) +
+#     theme_classic(base_size = 16)
+
+df_summary = get_psychometric(fit, "confidence") %>%
+  group_by(variable, subject) %>%
+  summarise(mean = mean(value),
+            lower = quantile(value, 0.05),
+            upper = quantile(value, 0.95),
+            .groups = "drop")
+
+ggplot(df_summary, aes(y = subject, x = mean)) +
+  geom_pointrange(aes(xmin = lower, xmax = upper), fatten = 0.5) +
+  facet_wrap(~variable, scales = "free_x") +
+  theme_classic(base_size = 14)+
+  theme(axis.ticks.y = element_blank(),
+        axis.text.y = element_blank())
+
+
+
+```
 

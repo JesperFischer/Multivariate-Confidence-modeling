@@ -15,7 +15,7 @@ Get_predictive_ACC_hier = function(fit, df, n_draws = 50) {
   df$subject = as.numeric(as.factor(df$subject))
 
   workers = 7
-  memory = 25000 * 1024^2
+  memory = 15000 * 1024^2
 
   # Parameters in the model
   parameters = c("alpha", "beta", "lapse",
@@ -31,6 +31,7 @@ Get_predictive_ACC_hier = function(fit, df, n_draws = 50) {
     pivot_longer(-draw) %>%
     extract(name, into = c("variable", "subject"),
             regex = "([a-zA-Z0-9_]+)\\[(\\d+)\\]", convert = TRUE)
+
 
   # Set up parallel processing
   plan(multisession, workers = workers)
@@ -837,7 +838,7 @@ Get_predictive_group = function(fit, df, n_draws = 50) {
   df$subject = as.numeric(as.factor(df$subject))
 
   workers = 7
-  memory = 25000 * 1024^2
+  memory = 15000 * 1024^2
 
   # Group-level parameters (from gm)
   parameters = c("alpha", "beta", "lapse",
@@ -954,6 +955,8 @@ Get_predictive_group = function(fit, df, n_draws = 50) {
 # Function to plot group-level predictions with ribbons
 Plot_group_predictive_psycho = function(predictions, df) {
 
+  cutoff = 40
+
   # Prepare observed data
   dataq = bind_rows(
     df %>%
@@ -991,7 +994,7 @@ Plot_group_predictive_psycho = function(predictions, df) {
                 q95 = mean(Confidence) + 2 * (sd(Confidence) / sqrt(n())),
                 .groups = "drop")
   ) %>%
-    filter(abs(X) < 25)
+    filter(abs(X) < cutoff)
 
   # Prepare predicted data (using expected means)
   predictionsq_mean = bind_rows(
@@ -1031,7 +1034,7 @@ Plot_group_predictive_psycho = function(predictions, df) {
                 q80 = quantile(conf_mu_actual, 0.80),
                 .groups = "drop")
   ) %>%
-    filter(abs(X) < 25) %>%
+    filter(abs(X) < cutoff) %>%
     mutate(Correct = ifelse(Correct == 1, "Correct",ifelse(Correct == 0, "Incorrect",NA)))
 
   # Calculate trial-level residuals properly
@@ -1046,7 +1049,7 @@ Plot_group_predictive_psycho = function(predictions, df) {
 
   # Join predictions to actual trial-level data
   df_with_pred = df %>%
-    filter(abs(X) < 25) %>%
+    filter(abs(X) < cutoff) %>%
     left_join(pred_mean_per_trial, by = "X") %>%
     mutate(Correct_label = ifelse(Correct == 1, "Correct", "Incorrect"))
 
@@ -1168,7 +1171,7 @@ Plot_group_predictive_psycho = function(predictions, df) {
                 q80 = quantile(Confidence, 0.80),
                 .groups = "drop")
   ) %>%
-    filter(abs(X) < 25) %>%
+    filter(abs(X) < cutoff) %>%
     mutate(Correct = ifelse(Correct == 1, "Correct",ifelse(Correct == 0, "Incorrect",NA)))
 
 

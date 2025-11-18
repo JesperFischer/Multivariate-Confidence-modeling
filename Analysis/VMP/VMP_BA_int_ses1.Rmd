@@ -68,8 +68,10 @@ plots
 ```
 
 ```{r, fig.height=7,fig.width=12}
+# df1 = df %>% filter(!subject %in% removers_vmp2 & cohort == "vmp2")
+df1 = df %>% filter(!subject %in% c("249","258","344","399") & cohort == "vmp2") %>% 
+    mutate(X_scaled = (X - mean(X)) / sd(X))
 
-df1 = df %>% filter(!subject %in% removers_vmp2 & cohort == "vmp2")
 
 df1$subject = as.numeric(as.factor(df1$subject))
 
@@ -111,8 +113,10 @@ cor <-mod$sample(
   parallel_chains = 4)
 
 cor$save_object(here::here("Saved models","VMP_BA_int_ses1_chrt2.rds"))
+```
 
 
+```{r, fig.height=7,fig.width=12}
 mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","Pure","psycho.stan"))
 
 
@@ -230,6 +234,42 @@ df1 %>% filter(subject == 25) %>% ggplot(aes(x = RT, y = Confidence))+geom_point
 cor.test(df1 %>% filter(subject == 25) %>% .$RT, df1 %>% filter(subject == 25) %>% .$Confidence)
 ```
 
+
+
+```{r, fig.height=7,fig.width=12}
+preds = Get_predictive_ACC_hier(fit,df1,20)
+
+bin_pure = Plot_psychometric_ACC_hier(preds,df1)
+
+bin_pure
+
+Plot_psychometric_resp_hier(preds,df1)
+```
+```{r, fig.height=7, fig.width=12, warning=FALSE}
+rt = Plot_RT_hier(preds,df1, bin = 7)
+rt
+```
+
+```{r, fig.height=7,fig.width=12, warning=FALSE}
+conf = Plot_Conf_ACC_hier(preds,df1, bin = 7)
+conf
+```
+
+
+
+```{r, fig.height=7,fig.width=12, warning=FALSE}
+
+predictions = Get_predictive_group(fit ,df1,2000)
+
+plots = Plot_group_predictive_psycho(predictions, df1)
+
+plots
+
+
+ggsave(here::here("Extero_VMP1_marginal_means.tiff"), plots$plot_combined, dpi = 100, width = 12, height = 8)
+
+
+```
 
 
 ```{r}
