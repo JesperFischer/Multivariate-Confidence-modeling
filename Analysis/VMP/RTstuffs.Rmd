@@ -1,0 +1,199 @@
+---
+title: "Decender2020"
+output: html_document
+date: "2025-10-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(tidyverse,posterior,tidybayes,cmdstanr, furrr,ordbetareg, future.apply, patchwork,purrr, bayesplot)
+
+
+invisible(
+  lapply(
+    list.files(here::here("Analysis", "Functions"), pattern = "\\.[Rr]$", full.names = TRUE),
+    source
+  )
+)
+```
+
+## R Markdown
+
+# Preprocesing
+
+```{r}
+df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>% 
+    mutate(DecisionRT = as.numeric(DecisionRT),
+           ConfidenceRT = as.numeric(ConfidenceRT),
+         Confidence = as.numeric(Confidence),
+         ResponseCorrect = as.numeric(ifelse(ResponseCorrect == "1",1,
+                                             ifelse(ResponseCorrect == "1.0",1,
+                                                    ifelse(ResponseCorrect == "True",1,
+                                                           ifelse(ResponseCorrect == "0",0,
+                                                                  ifelse(ResponseCorrect == "0.0",0,
+                                                                         ifelse(ResponseCorrect == "False",0,NA))))))),
+         Decision = ifelse(Decision == "More",1,ifelse(Decision == "Less",0,NA))) %>% 
+  mutate(participant_id = as.numeric(as.factor(participant_id))) %>%
+  filter(Modality == "Extero",
+         session == 1) %>% 
+  filter(DecisionRT < 8 & DecisionRT > 0.1)%>% 
+  select(ResponseCorrect,participant_id,DecisionRT,Decision, Confidence, ConfidenceRT, Alpha,cohort)  %>% drop_na() %>% 
+  rename(
+    Confidence = Confidence,
+    X  = Alpha,
+    Y = Decision,
+    Correct = ResponseCorrect,
+    RT = DecisionRT,
+    subject = participant_id
+  ) %>% 
+  mutate(Confidence = Confidence/100)
+
+```
+
+# bad subjects
+```{r, fig.width=10,fig.height=7, message=FALSE, warning=FALSE}
+remover(df)
+
+removers_vmp2 = c("16","46","227","233","249","263","275","312","298","300","326","397","470","546")
+```
+
+
+```{r, fig.height=7,fig.width=12, message=F, error=F,warning=F}
+n_subj <- length(unique(df %>% filter(!subject %in% c("16","46","227","233","249","263","275","312","298","300","326","397","470","546")) %>% .$subject))
+subject_chunks <- split(1:n_subj, ceiling(seq_along(1:n_subj) / 10))
+
+plots <- lapply(subject_chunks, function(chunk) plot_subjects(df%>% filter(!subject %in% c("16","46","227","233","249","263","275","312","298","300","326","397","470","546")), chunk, bin = 7))
+plots[[1]]
+plots[[2]]
+
+```
+
+```{r, fig.height=7,fig.width=12}
+
+df1 = df %>% filter(!subject %in% c("16","46","227","233","249","263","275","312","298","300","326","397","470","546"))
+
+df1$subject = as.numeric(as.factor(df1$subject))
+
+t_p_s = df1 %>% group_by(subject) %>% summarize(n = n())
+
+
+ends <- cumsum(t_p_s$n)
+
+# Calculate the start points
+starts <- c(1, head(ends, -1) + 1)
+
+# mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
+# mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct_rtstim.stan"))
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","RTmodels","rtstim.stan"))
+
+datastan = list(N = nrow(df1),
+                S = length(unique(df1$subject)),
+                starts = starts,
+                minRT = df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT,
+                ends = ends,
+                t_p_s = t_p_s$n,
+                X = df1$X,
+                X_scaled = (df1$X - mean(df1$X)) / sd(df1$X),
+                S_id = df1$subject,
+                RT = df1$RT,
+                ACC = df1$Correct,
+                K = length(unique(df1$Confidence)),
+                Conf = df1$Confidence,
+                binom_y = df1$Y)
+
+
+cor <-mod$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 1500,
+  iter_warmup = 500,
+  adapt_delta = 0.99,
+  max_treedepth = 13,
+  init  = 0,
+  parallel_chains = 4)
+
+cor$save_object(here::here("Saved models","VMP_full_standard.rds"))
+
+
+
+
+mod2 = cmdstanr::cmdstan_model(here::here("Stanmodels","RTmodels","two_ints.stan"))
+
+datastan = list(N = nrow(df1),
+                S = length(unique(df1$subject)),
+                starts = starts,
+                minRT = df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT,
+                ends = ends,
+                t_p_s = t_p_s$n,
+                X = df1$X,
+                X_scaled = (df1$X - mean(df1$X)) / sd(df1$X),
+                S_id = df1$subject,
+                RT = df1$RT,
+                ACC = df1$Correct,
+                K = length(unique(df1$Confidence)),
+                Conf = df1$Confidence,
+                binom_y = df1$Y)
+
+
+two_ints <-mod2$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 1500,
+  iter_warmup = 500,
+  adapt_delta = 0.99,
+  max_treedepth = 13,
+  init  = 0,
+  parallel_chains = 4)
+
+two_ints$save_object(here::here("Saved models","VMP_full_twoints.rds"))
+
+
+twointsloo = two_ints$loo()
+corloo = cor$loo()
+
+loo::loo_compare(list(twointsloo,corloo))
+
+
+# mod3 = cmdstanr::cmdstan_model(here::here("Stanmodels","RTmodels","pure.stan"))
+mod3 = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","Pure","pure.stan"))
+
+datastan = list(N = nrow(df1),
+                S = length(unique(df1$subject)),
+                starts = starts,
+                minRT = df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT,
+                ends = ends,
+                t_p_s = t_p_s$n,
+                X = df1$X,
+                X_scaled = (df1$X - mean(df1$X)) / sd(df1$X),
+                S_id = df1$subject,
+                RT = df1$RT,
+                ACC = df1$Correct,
+                   K = length(unique(df1$Confidence)),
+                Conf = df1$Confidence,
+                binom_y = df1$Y)
+
+
+pure <-mod3$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 1500,
+  iter_warmup = 500,
+  adapt_delta = 0.99,
+  max_treedepth = 13,
+  init  = 0,
+  parallel_chains = 4)
+
+pure$save_object(here::here("Saved models","VMP_full_pure.rds"))
+
+twointsloobin = two_ints$loo("log_lik_bin")
+corloobin = cor$loo("log_lik_bin")
+pureloo = pure$loo()
+
+loo::loo_compare(list(twointsloobin,corloobin,pureloo))
+
+
+
+
+```
+

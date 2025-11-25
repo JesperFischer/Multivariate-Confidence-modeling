@@ -195,6 +195,7 @@ data {
 
   vector[N] X;
 
+
   vector[S] minRT;
 
   vector[N] ACC; // Vector of deltaBPM values that match the binary response
@@ -271,12 +272,10 @@ transformed parameters{
 
 }
 model {
-   gm[1] ~ normal(0,10); //global mean of beta
-  gm[2] ~ normal(-2,3); //global mean of beta
+  gm[1] ~ normal(0,5); //global mean of beta
+  gm[2] ~ normal(-2,2); //global mean of beta
   gm[3] ~ normal(-4,2); //global mean of beta
-  gm[4:7] ~ normal(0,3); //global mean of beta
-  gm[8] ~ normal(0,2); //global mean of beta
-  gm[9] ~ normal(0,2); //global mean of beta
+  gm[4:9] ~ normal(0,2); //global mean of beta
 
 
 
@@ -285,7 +284,8 @@ model {
   tau_u[1] ~ normal(3 , 3);
   tau_u[2] ~ normal(0 , 3);
   tau_u[3] ~ normal(0 , 3);
-  tau_u[4:9] ~ normal(0 , 3);
+  tau_u[4:9] ~ normal(0 , 2);
+
 
   L_u ~ lkj_corr_cholesky(2);
 

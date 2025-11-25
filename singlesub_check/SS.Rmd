@@ -1,0 +1,527 @@
+---
+title: "Decender2020"
+output: html_document
+date: "2025-10-13"
+---
+
+
+```{r}
+load_and_clean_dataset <- function(filename) {
+
+  # filename = datasets_wrong_right[4]
+
+  filepath <- file.path(dataPath, filename)
+
+  # Check if file exists
+  if (!file.exists(filepath)) {
+    warning(paste("File not found:", filename))
+    return(NULL)
+  }
+
+  # Read data
+  data <- read.csv(filepath, fileEncoding = "UTF-8-BOM")
+
+  # Add dataset identifier
+  data$Dataset <- gsub(".csv", "", filename)
+
+  # Ensure required columns exist
+  required_cols <- c("Subj_idx", "Stimulus", "Response", "Confidence")
+  if (!all(required_cols %in% names(data))) {
+    warning(paste("Missing required columns in:", filename))
+    return(NULL)
+  }
+
+  # Add Correct column if not present
+  if (!"Correct" %in% names(data)) {
+    data$Correct <- as.numeric(data$Stimulus == data$Response)
+  }
+
+  # Clean data
+  data <- data %>%
+    filter(!is.na(Confidence), !is.na(Correct)) %>%
+    mutate(
+      Correct_label = ifelse(Correct == 1, "Correct", "Incorrect"),
+      Subj_idx = as.factor(Subj_idx)
+    )
+
+  return(data)
+}
+
+# Load required libraries
+pacman::p_load(tidyverse, patchwork, here)
+
+# Set data path
+dataPath <- here::here("Data", "Confidence Database", "Confidence Database")
+
+# Define the datasets with "wrong to right" confidence scales
+datasets_wrong_right <- c(
+  "data_Pereira_2018.csv"
+)
+
+# Load all datasets
+cat("Loading datasets...\n")
+all_data <- map_dfr(datasets_wrong_right, load_and_clean_dataset)
+
+# Summary statistics
+cat("\n=== Summary Statistics ===\n")
+cat("Total datasets loaded:", length(unique(all_data$Dataset)), "\n")
+cat("Total subjects:", length(unique(all_data$Subj_idx)), "\n")
+cat("Total trials:", nrow(all_data), "\n\n")
+
+# Print dataset-specific summaries
+dataset_summary <- all_data %>%
+  group_by(Dataset) %>%
+  summarise(
+    N_subjects = n_distinct(Subj_idx),
+    N_trials = n(),
+    Mean_Accuracy = mean(Correct, na.rm = TRUE),
+    Has_RT_dec = any(!is.na(RT_dec)),
+    # Has_RT_conf = any(!is.na(RT_conf)),
+    Conf_min = min(Confidence, na.rm = TRUE),
+    Conf_max = max(Confidence, na.rm = TRUE)
+  )
+
+print(dataset_summary)
+```
+
+
+```{r, fig.height=10,fig.width=10}
+df1 = all_data %>% filter(Subj_idx != "18" & RT_dec > 0 & RT_dec < 500) %>%
+  mutate(Difficulty = ifelse(Stimulus == 2, Ease, -Ease),
+         Response = Response-1) %>%
+  rename(
+    Confidence = Confidence,
+    X  = Difficulty,
+    Y = Response,
+    Correct = Correct,
+    RT = RT_dec,
+    subject = Subj_idx
+  ) %>%
+  mutate(resp = Y) %>% 
+  filter(subject == 7)
+ 
+
+df1 %>% pivot_longer(cols = c("Confidence","RT","Y")) %>% group_by(X,name,Correct) %>% 
+  summarize(mean = mean(value)) %>% ggplot(aes(x = X, y = mean, col = Correct))+facet_wrap(~name)+geom_point()
+```
+
+
+```{r, fig.height=10,fig.width=10}
+# mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","ACC_Bin_hier_Correct.stan"))
+mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","real","ACC_bin_ss_correct.stan"))
+
+# mod = cmdstanr::cmdstan_model(here::here("Stanmodels","ss","Pure","psycho.stan"))
+
+datastan = list(N = nrow(df1),
+                minRT = df1 %>% group_by(subject) %>% summarize(minRT = min(RT)) %>% .$minRT,
+                X = df1$X,
+                RT = df1$RT,
+                ACC = df1$Correct,
+                K = length(unique(df1$Confidence)),
+                Conf = df1$Confidence,
+                binom_y = df1$Correct)
+
+
+
+cor <-mod$sample(
+  data = datastan,
+  refresh = 10,
+  iter_sampling = 1000,
+  iter_warmup = 1000,
+  adapt_delta = 0.90,
+  max_treedepth = 10,
+  init  = 0,
+  parallel_chains = 4)
+
+
+cor$save_object(here::here("fit_sub_19.rds"))
+
+n_draws = 2000
+
+workers = 7
+memory = 15000 * 1024^2
+
+# Group-level parameters (from gm)
+parameters = c("alpha", "beta", "lapse",
+               "rt_int", "rt_slope", "rt_prec",
+               "conf_prec", "meta_un", "meta_bias")
+
+# Extract group means (gm)
+df_param = as_draws_df(cor$draws("gm")) %>%
+  select(-contains(".")) %>%
+  rename_with(~parameters) %>%
+  mutate(draw = 1:n()) %>%
+  pivot_longer(-draw, names_to = "variable")
+
+# Get average values for subject-specific parameters
+constants = as_draws_df(cor$draws(c("rt_ndt", "c0", "c11",
+                                    "rho_p_rt", "rho_p_conf", "rho_rt_conf"))) %>%
+  select(-contains(".")) %>%
+  mutate(draw = 1:n()) %>%
+  pivot_longer(-draw) %>%
+  extract(name, into = c("variable"),
+          regex = "([a-zA-Z0-9_]+)", convert = TRUE) %>%
+  group_by(variable) %>%
+  summarize(mean = mean(value)) %>%
+  pivot_wider(names_from = variable, values_from = mean)
+
+# Set up parallel processing
+plan(multisession, workers = workers)
+options(future.globals.maxSize = memory)
+
+draws <- 1:n_draws
+
+# Only use the number of draws that the user wants
+dfq = df_param %>% filter(draw %in% draws)
+
+
+# Function to get the draws
+pred_list <- future_lapply(draws, function(d) {
+
+  # Extract parameter vectors for this draw
+  params <- dfq %>%
+    filter(draw == d) %>%
+    select(variable, value) %>%
+    pivot_wider(names_from = "variable", values_from = "value")
+
+  # Generate X values
+  x = seq(-40, 40, by = 0.5)
+  n_trials = length(x)
+
+  # Get probability correct for each trial (using same approach as subject-level)
+  prob_faster = psycho(x, params$alpha, exp(params$beta), brms::inv_logit_scaled(params$lapse) / 2)
+  prob_cor = get_prob_cor(prob_faster, x)
+
+  # Entropy for RT model
+  entropy_t = entropy(prob_faster)
+
+  # Theta for confidence (with meta_un)
+  prob_faster_conf = psycho(x, params$alpha, exp(params$beta + params$meta_un), brms::inv_logit_scaled(params$lapse) / 2)
+
+  # Build correlation matrix from averaged copula parameters
+  R = matrix(c(1, constants$rho_p_rt, constants$rho_p_conf,
+               constants$rho_p_rt, 1, constants$rho_rt_conf,
+               constants$rho_p_conf, constants$rho_rt_conf, 1),
+             nrow = 3, byrow = TRUE)
+
+  # Sample multivariate normals (same as subject-level code)
+  z_samples = MASS::mvrnorm(n = n_trials, mu = rep(0, 3), Sigma = R)
+
+  # Transform to uniform [0,1] via standard normal CDF
+  u_samples = pnorm(z_samples)
+
+  # Transform uniforms to marginal distributions
+  ACC_pred = rbinom(length(prob_cor), 1, prob_cor)
+
+  # 2. RT (lognormal)
+  rt_mu = params$rt_int + params$rt_slope * entropy_t
+  RT_pred = qlnorm(u_samples[, 2], meanlog = rt_mu, sdlog = exp(params$rt_prec)) + constants$rt_ndt
+
+  # Calculate expected RT mean
+  rt_mu_expected = exp(rt_mu + exp(params$rt_prec)^2 / 2) + constants$rt_ndt
+
+  # 3 Confidence mean (probability of getting it correct from confidence)
+  prob_cor_conf = get_conf(ACC_pred, prob_faster_conf, x, params$alpha)
+
+  # Apply meta_bias in logit space
+  conf_mu_correct = brms::inv_logit_scaled(qlogis(prob_cor_conf) + params$meta_bias)
+
+  # Sample confidence values
+  conf_pred_correct = qordbeta(u_samples[, 3],
+                               mu = conf_mu_correct,
+                               phi = exp(params$conf_prec),
+                               cutzero = constants$c0,
+                               cutone = exp(constants$c0) + constants$c11)
+
+  predictions = data.frame(
+    X = x,
+    Correct = ACC_pred,  # 1 if correct, 0 if incorrect
+    prob = prob_cor,
+    RT_pred = RT_pred,
+    conf_mu_actual = conf_mu_correct,
+    rt_mu = rt_mu_expected,
+    Confidence = conf_pred_correct,
+    prob_faster = prob_faster,
+    draw = d
+  )
+
+  return(predictions)
+}, future.seed = TRUE)
+
+# Flatten nested list and create a tidy long dataframe
+predictions = map_dfr(pred_list, bind_rows)
+```
+
+
+```{r, fig.height=10,fig.width=10}
+Plot_group_predictive_psycho = function(predictions, df, n_bins = NULL) {
+
+  cutoff = 40
+
+  # Prepare observed data
+  if (!is.null(n_bins)) {
+    # Create common bin boundaries based on the range of both datasets
+    all_X <- c(df$X, predictions$X)
+    X_range <- range(all_X, na.rm = TRUE)
+    bin_breaks <- seq(X_range[1], X_range[2], length.out = n_bins + 1)
+
+    # Calculate bin centers (midpoints)
+    bin_centers <- (bin_breaks[-1] + bin_breaks[-length(bin_breaks)]) / 2
+
+    # Bin the data using the common breaks and assign bin centers
+    df <- df %>%
+      mutate(X_bin = cut(X, breaks = bin_breaks, labels = FALSE, include.lowest = TRUE),
+             X = bin_centers[X_bin]) %>%
+      select(-X_bin)
+
+    # Bin the predictions using the same common breaks and assign same bin centers
+    predictions <- predictions %>%
+      mutate(X_bin = cut(X, breaks = bin_breaks, labels = FALSE, include.lowest = TRUE),
+             X = bin_centers[X_bin]) %>%
+      select(-X_bin)
+  }
+
+  dataq = bind_rows(
+    df %>%
+      mutate(Correct = ifelse(Correct == 1, "Correct", "Incorrect")) %>%
+      group_by(X) %>%
+      summarize(
+        name = "Type-1",
+        n = n(),
+        k = sum(Y),
+        mean = (1 + k) / (2 + n),
+        q5  = qbeta(0.05, 1 + k, 1 + n - k),
+        q10 = qbeta(0.10, 1 + k, 1 + n - k),
+        q20 = qbeta(0.20, 1 + k, 1 + n - k),
+        q80 = qbeta(0.80, 1 + k, 1 + n - k),
+        q90 = qbeta(0.90, 1 + k, 1 + n - k),
+        q95 = qbeta(0.95, 1 + k, 1 + n - k),
+        .groups = "drop"
+      ),
+
+    df %>%
+      mutate(Correct = ifelse(Correct == 1, "Correct", "Incorrect")) %>%
+      group_by(X) %>%
+      summarize(name = "RT",
+                mean = mean(RT),
+                q5 = mean(RT) - 2 * (sd(RT) / sqrt(n())),
+                q95 = mean(RT) + 2 * (sd(RT) / sqrt(n())),
+                .groups = "drop"),
+
+    df %>%
+      mutate(Correct = ifelse(Correct == 1, "Correct", "Incorrect")) %>%
+      group_by(X, Correct) %>%
+      summarize(name = "Confidence",
+                mean = mean(Confidence),
+                q5 = mean(Confidence) - 2 * (sd(Confidence) / sqrt(n())),
+                q95 = mean(Confidence) + 2 * (sd(Confidence) / sqrt(n())),
+                .groups = "drop")
+  ) %>%
+    filter(abs(X) < cutoff)
+
+  # Prepare predicted data (using expected means)
+  predictionsq_mean = bind_rows(
+    predictions %>%
+      group_by(X) %>%
+      summarize(name = "Type-1",
+                mean = mean(prob_faster ),
+                q5 = quantile(prob_faster , 0.05),
+                q10 = quantile(prob_faster , 0.1),
+                q20 = quantile(prob_faster , 0.2),
+                q95 = quantile(prob_faster , 0.95),
+                q90 = quantile(prob_faster , 0.90),
+                q80 = quantile(prob_faster , 0.80),
+                .groups = "drop"),
+
+    predictions %>%
+      group_by(X) %>%
+      summarize(name = "RT",
+                mean = mean(rt_mu),
+                q5 = quantile(rt_mu, 0.05),
+                q10 = quantile(rt_mu, 0.1),
+                q20 = quantile(rt_mu, 0.2),
+                q95 = quantile(rt_mu, 0.95),
+                q90 = quantile(rt_mu, 0.90),
+                q80 = quantile(rt_mu, 0.80),
+                .groups = "drop"),
+
+    predictions %>%
+      group_by(X, Correct) %>%
+      summarize(name = "Confidence",
+                mean = mean(conf_mu_actual),
+                q5 = quantile(conf_mu_actual, 0.05),
+                q10 = quantile(conf_mu_actual, 0.1),
+                q20 = quantile(conf_mu_actual, 0.2),
+                q95 = quantile(conf_mu_actual, 0.95),
+                q90 = quantile(conf_mu_actual, 0.90),
+                q80 = quantile(conf_mu_actual, 0.80),
+                .groups = "drop")
+  ) %>%
+    filter(abs(X) < cutoff) %>%
+    mutate(Correct = ifelse(Correct == 1, "Correct",ifelse(Correct == 0, "Incorrect",NA)))
+
+  # Calculate trial-level residuals properly
+  # For Type-1: observed Y vs predicted prob_faster (across draws, use mean prediction)
+  pred_mean_per_trial = predictions %>%
+    group_by(X) %>%
+    summarize(
+      pred_prob_faster = mean(prob_faster),
+      pred_rt = mean(rt_mu),
+      .groups = "drop"
+    )
+
+  # Join predictions to actual trial-level data
+  df_with_pred = df %>%
+    filter(abs(X) < cutoff) %>%
+    left_join(pred_mean_per_trial, by = "X") %>%
+    mutate(Correct_label = ifelse(Correct == 1, "Correct", "Incorrect"))
+
+  # Confidence predictions need to be split by Correct
+  pred_conf_per_trial = predictions %>%
+    group_by(X, Correct) %>%
+    summarize(pred_conf = mean(conf_mu_actual), .groups = "drop") %>%
+    mutate(Correct_label = ifelse(Correct == 1, "Correct", "Incorrect"))
+
+  df_with_pred = df_with_pred %>%
+    left_join(pred_conf_per_trial %>% select(X, Correct_label, pred_conf),
+              by = c("X", "Correct_label"))
+
+  # Calculate residuals at trial level, then aggregate
+  residuals_data = bind_rows(
+    df_with_pred %>%
+      mutate(residual = Y - pred_prob_faster,
+             name = "Type-1") %>%
+      group_by(X) %>%
+      summarize(residual_mean = mean(residual, na.rm = TRUE),
+                residual_se = sd(residual, na.rm = TRUE) / sqrt(n()),
+                name = first(name),
+                .groups = "drop"),
+
+    df_with_pred %>%
+      mutate(residual = RT - pred_rt,
+             name = "RT") %>%
+      group_by(X) %>%
+      summarize(residual_mean = mean(residual, na.rm = TRUE),
+                residual_se = sd(residual, na.rm = TRUE) / sqrt(n()),
+                name = first(name),
+                .groups = "drop"),
+
+    df_with_pred %>%
+      mutate(residual = Confidence - pred_conf,
+             name = "Confidence") %>%
+      group_by(X, Correct_label) %>%
+      summarize(residual_mean = mean(residual, na.rm = TRUE),
+                residual_se = sd(residual, na.rm = TRUE) / sqrt(n()),
+                name = first(name),
+                .groups = "drop") %>%
+      rename(Correct = Correct_label)
+  )
+
+  # Plot 1: Expected means (main plot)
+  plot_mean = predictionsq_mean %>%
+    ggplot() +
+    geom_ribbon(aes(x = X, y = mean, ymin = q5, ymax = q95, fill = Correct), alpha = 0.1) +
+    geom_ribbon(aes(x = X, y = mean, ymin = q10, ymax = q90, fill = Correct), alpha = 0.3) +
+    geom_ribbon(aes(x = X, y = mean, ymin = q20, ymax = q80, fill = Correct), alpha = 0.5) +
+    geom_pointrange(data = dataq, aes(x = X, y = mean, ymin = q5, ymax = q95, fill = Correct),
+                    shape = 21, color = "black", alpha = 0.5) +
+    geom_line(aes(x = X, y = mean, color = Correct), linewidth = 1) +
+    facet_wrap(~name, scales = "free_y", ncol = 3) +
+    theme_classic(base_size = 16) +
+    labs(color = "Correct", fill = "Correct",
+         title = "Group predictions (expected means)",
+         y = "Value") +
+    geom_vline(xintercept = 0, linetype = 2) +
+    theme(legend.position = "top",
+          axis.title.x = element_blank(),
+          axis.text.x = element_blank())
+
+  # Plot 2: Residuals
+  plot_residuals = residuals_data %>%
+    ggplot(aes(x = X, y = residual_mean, color = Correct, fill = Correct)) +
+    geom_hline(yintercept = 0, linetype = 2, alpha = 0.5) +
+    geom_pointrange(aes(ymin = residual_mean - 2*residual_se,
+                        ymax = residual_mean + 2*residual_se),
+                    alpha = 0.5, size = 0.3) +
+    geom_smooth(method = "loess", se = TRUE, alpha = 0.2) +
+    facet_wrap(~name, scales = "free_y", ncol = 3) +
+    theme_classic(base_size = 16) +
+    labs(x = "Stimulus strength (X)", y = "Residual (Obs - Pred)") +
+    geom_vline(xintercept = 0, linetype = 2) +
+    theme(legend.position = "none")
+
+  # Combine plots using patchwork
+  combined_plot = plot_mean / plot_residuals +
+    plot_layout(heights = c(2, 1))
+
+  combined_plot
+
+  # Prepare predicted data (using actual samples)
+  predictionsq_preds = bind_rows(
+    predictions %>%
+      group_by(X) %>%
+      summarize(name = "Type-1",
+                mean = mean(prob_faster ),
+                q5 = quantile(prob_faster , 0.05),
+                q10 = quantile(prob_faster , 0.1),
+                q20 = quantile(prob_faster , 0.2),
+                q95 = quantile(prob_faster , 0.95),
+                q90 = quantile(prob_faster , 0.90),
+                q80 = quantile(prob_faster , 0.80),
+                .groups = "drop"),
+
+    predictions %>%
+      group_by(X) %>%
+      summarize(name = "RT",
+                mean = mean(RT_pred),
+                q5 = quantile(RT_pred, 0.05),
+                q10 = quantile(RT_pred, 0.1),
+                q20 = quantile(RT_pred, 0.2),
+                q95 = quantile(RT_pred, 0.95),
+                q90 = quantile(RT_pred, 0.90),
+                q80 = quantile(RT_pred, 0.80),
+                .groups = "drop"),
+
+    predictions %>%
+      group_by(X, Correct) %>%
+      summarize(name = "Confidence",
+                mean = mean(Confidence),
+                q5 = quantile(Confidence, 0.05),
+                q10 = quantile(Confidence, 0.1),
+                q20 = quantile(Confidence, 0.2),
+                q95 = quantile(Confidence, 0.95),
+                q90 = quantile(Confidence, 0.90),
+                q80 = quantile(Confidence, 0.80),
+                .groups = "drop")
+  ) %>%
+    filter(abs(X) < cutoff) %>%
+    mutate(Correct = ifelse(Correct == 1, "Correct",ifelse(Correct == 0, "Incorrect",NA)))
+
+
+  # Plot 2: Actual predictions
+  plot_preds = predictionsq_preds %>%
+    ggplot() +
+    geom_ribbon(aes(x = X, y = mean, ymin = q5, ymax = q95, fill = Correct), alpha = 0.1) +
+    geom_ribbon(aes(x = X, y = mean, ymin = q10, ymax = q90, fill = Correct), alpha = 0.3) +
+    geom_ribbon(aes(x = X, y = mean, ymin = q20, ymax = q80, fill = Correct), alpha = 0.5) +
+    geom_pointrange(data = dataq, aes(x = X, y = mean, ymin = q5, ymax = q95, fill = as.factor(Correct)),
+                    shape = 21, color = "black", alpha = 0.5) +
+    geom_line(aes(x = X, y = mean, color = Correct), linewidth = 1) +
+    facet_wrap(~name, scales = "free", ncol = 3) +
+    theme_classic(base_size = 16) +
+    labs(color = "Correct", fill = "Correct",
+         title = "Group predictions (posterior predictive samples)") +
+    geom_vline(xintercept = 0, linetype = 2) +
+    theme(legend.position = "top")
+
+  return(list(
+    plot_combined = combined_plot,
+    plot_mean = plot_mean,
+    plot_residuals = plot_residuals,
+    plot_preds = plot_preds
+  ))
+}
+
+Plot_group_predictive_psycho(predictions,df1,n_bins = 25)
+```
+
