@@ -1,8 +1,13 @@
 Contributor: Andrey Chetverikov (andrey.a.chetverikov@gmail.com)
 
-Citation: Chetverikov, A., & Filippova, M. (2014, Exp. 3). How to tell a wife from a hat: Affective feedback in perceptual categorization. Acta Psychologica, 151, 206–213. doi:10.1016/j.actpsy.2014.06.012
+Citation: Chetverikov, A., & Filippova, M. (2014, Exp. 3).
+How to tell a wife from a hat: Affective feedback in perceptual categorization. Acta Psychologica, 151, 206–213. doi:10.1016/j.actpsy.2014.06.012
 
-Stimulus: On each trial, observers saw a degraded image that they had to categorize into one of three categories: Human, Animal, or Object. Then, they indicated their confidence (Confidence) and how much did they like the image (Liking). Stimulus difficulty is computed for each subject and stimulus as a share of correct responses to this stimulus by other subjects. 
+
+
+Stimulus: On each trial, observers saw a degraded image that they had to categorize into one of three categories: Human, Animal, or Object.
+Then, they indicated their confidence (Confidence) and how much did they like the image (Liking).
+Stimulus difficulty is computed for each subject and stimulus as a share of correct responses to this stimulus by other subjects.
 
 Confidence scale: Confidence was rated on a 100-point scale. No explicit verbal instructions were given about the interpretation of the scale.
 
@@ -10,11 +15,11 @@ Manipulations: The order of ratings (Confidence and Liking) was counterbalanced 
 
 Main result: both confidence and liking ratings reflect response accuracy. With higher confidence, the difference in liking between correct and incorrect responses (conditioned on confidence level) becomes larger.
 
-Block size: Each participant did three training images and 25 trials in the main part without breaks. 
+Block size: Each participant did three training images and 25 trials in the main part without breaks.
 
 Feedback: no feedback was provided.
 
-Subject population: Undergraduate students (age is included in the data). 
+Subject population: Undergraduate students (age is included in the data).
 
 Response device: Keyboard for categorization, mouse for ratings.
 
@@ -27,7 +32,7 @@ Location of data collection: St. Petersburg State University, St. Petersburg, Ru
 Language of study: Russian.
 
 Additional fields included:
-'ImgID' - image file ID (name) 
-'Liking' - liking rating 
+'ImgID' - image file ID (name)
+'Liking' - liking rating
 'RT_liking' - liking RT_liking
 'SbjAge','SbjSex' - age and sex of the participant

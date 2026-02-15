@@ -1,0 +1,882 @@
+---
+title: "Copula Model Comparison: Sample Size Effects"
+author: "Jesper Fischer Ehmsen^1^"
+output:
+  html_document:
+  word_document: default
+  pdf_document:
+    latex_engine: xelatex
+link-citations: true
+linkcolor: blue
+always_allow_html: true
+---
+
+# Showcase of Copula Implementation with Varying Sample Sizes
+
+## Load packages:
+```{r}
+packages = c("brms","tidyverse","bayesplot",
+             "pracma","here", "patchwork",
+             "posterior","HDInterval",
+             "loo", "furrr","cmdstanr","mnormt")
+
+
+do.call(pacman::p_load, as.list(packages))
+
+knitr::opts_chunk$set(echo = TRUE)
+
+register_knitr_engine(override = FALSE)
+
+set.seed(123)
+```
+
+## Overview
+
+In this analysis, we compare three modeling approaches for bivariate normal data with correlation $\rho$:
+
+1. **Two Marginal Gaussians** (independent, no correlation)
+2. **Multivariate Gaussian** (with correlation structure)
+3. **Copula Decomposition** (marginals + Gaussian copula)
+
+**Key Feature**: All models use priors that match the simulated data:
+- Means: $\mu_1 = 1$, $\mu_2 = 2$ with `normal(0, 10)` priors
+- Standard deviations: $\sigma_1 = 1$, $\sigma_2 = 1$ with `normal(0, 5)` priors
+- Correlation: varies across simulations
+
+We test multiple sample sizes: **N = 50, 100, 200, 500** to show how evidence accumulates.
+
+---
+
+## Model Formulations
+
+### 1. Two Marginal Gaussian Distributions (Independent)
+
+$$
+\mathbf{Y} =
+\begin{bmatrix}
+Y_1 \\[3pt] Y_2
+\end{bmatrix}
+\sim
+\mathcal{N}
+\!\left(
+\begin{bmatrix}
+\mu_1 \\[3pt] \mu_2
+\end{bmatrix},
+\;
+\begin{pmatrix}
+\sigma_1^2 & 0 \\
+0 & \sigma_2^2
+\end{pmatrix}
+\right)
+$$
+
+### 2. Multivariate Gaussian (Correlated)
+
+$$
+\mathbf{Y} =
+\begin{bmatrix}
+Y_1 \\[3pt] Y_2
+\end{bmatrix}
+\sim
+\mathcal{N}
+\!\left(
+\begin{bmatrix}
+\mu_1 \\[3pt] \mu_2
+\end{bmatrix},
+\;
+\begin{pmatrix}
+\sigma_1^2 & \sigma_1\sigma_2\rho \\
+\sigma_1\sigma_2\rho & \sigma_2^2
+\end{pmatrix}
+\right)
+$$
+
+When $\rho = 0$, this reduces to the independent case.
+
+### 3. Copula Decomposition
+
+Starting with marginals:
+$$
+Y_1 \sim \mathcal{N}(\mu_1,\sigma_1), \quad Y_2 \sim \mathcal{N}(\mu_2,\sigma_2)
+$$
+
+Transform to uniforms via probability integral transform, then to correlated standard normals:
+
+$$
+(z_1, z_2) = 
+\begin{bmatrix}
+\Phi^{-1}\big(F_1(Y_1)\big) \\
+\Phi^{-1}\big(F_2(Y_2)\big)
+\end{bmatrix}
+\sim 
+\mathcal{N}\Bigg(
+\mathbf{0},
+\begin{bmatrix}
+1 & \rho \\
+\rho & 1
+\end{bmatrix}
+\Bigg)
+$$
+
+---
+
+## Stan Models
+
+### Model 1: Two Marginal Gaussians
+
+**Note**: Priors match simulated data parameters.
+
+```{cmdstan, output.var="marginal"}
+data {
+  int<lower=1> N;             // Number of observations
+  vector[N] y1;               // Outcome variable 1
+  vector[N] y2;               // Outcome variable 2
+}
+
+parameters {
+  vector[2] beta;                // Means [mu1, mu2]
+  vector<lower=0>[2] sigma;      // Standard deviations
+}
+
+model {
+  // Priors matching simulated data (mu1=1, mu2=2, sigma=1)
+  beta ~ normal(0, 5);     // Weakly informative around true values
+  sigma ~ normal(0, 3);     // Weakly informative around true values
+
+  // Independent likelihoods
+  for(i in 1:N){
+    y1[i] ~ normal(beta[1], sigma[1]);
+    y2[i] ~ normal(beta[2], sigma[2]);
+  }
+}
+
+generated quantities{
+  vector[N] log_lik = rep_vector(0,N);
+  
+  for (n in 1:N) {
+    log_lik[n] += normal_lpdf(y1[n] | beta[1], sigma[1]);
+    log_lik[n] += normal_lpdf(y2[n] | beta[2], sigma[2]);
+  }
+}
+```
+
+### Model 2: Multivariate Gaussian
+
+**Note**: Priors match simulated data parameters.
+
+```{cmdstan, output.var="multivariate"}
+data {
+  int<lower=1> N;                // Number of observations
+  matrix[N, 2] y;                // Observed outcomes [y1, y2]
+}
+
+parameters {
+  vector[2] beta;                // Means [mu1, mu2]
+  vector<lower=0>[2] sigma;      // Standard deviations
+  corr_matrix[2] Omega;          // Correlation matrix
+}
+
+transformed parameters {
+  cov_matrix[2] Sigma;           // Covariance matrix
+  Sigma = quad_form_diag(Omega, sigma);
+}
+
+model {
+  // Priors matching simulated data (mu1=1, mu2=2, sigma=1)
+  beta ~ normal(0, 5);     // Weakly informative around true values
+  sigma ~ normal(0, 3);     // Weakly informative around true values
+  Omega ~ lkj_corr(2);      // Uniform over correlations
+  
+  // Likelihood
+  for (n in 1:N) {
+    y[n] ~ multi_normal(beta, Sigma);
+  }
+}
+
+generated quantities{
+  vector[N] log_lik;
+  
+  for (n in 1:N) {
+    log_lik[n] = multi_normal_lpdf(y[n] | beta, Sigma);
+  }
+}
+```
+
+### Model 3: Gaussian Copula
+
+**Note**: Priors match simulated data parameters.
+
+```{cmdstan, output.var="copula"}
+functions {
+  
+  real gauss_copula_cholesky_lpdf(matrix u, matrix L) {
+    array[rows(u)] row_vector[cols(u)] q;
+    for (n in 1:rows(u)) {
+      q[n] = inv_Phi(u[n]);
+    }
+
+    return multi_normal_cholesky_lpdf(q | rep_row_vector(0, cols(L)), L)
+            - std_normal_lpdf(to_vector(to_matrix(q)));
+  }
+  
+  vector gauss_copula_cholesky_per_row(matrix u, matrix L) {
+    int N = rows(u);
+    int D = cols(u);
+    array[N] row_vector[D] q;
+    vector[N] loglik;
+
+    for (n in 1:N) {
+        q[n,] = inv_Phi(u[n,]);
+        loglik[n] = multi_normal_cholesky_lpdf(to_row_vector(q[n,]) | 
+                                                 rep_row_vector(0, D), L) - 
+                    std_normal_lpdf(to_vector(to_matrix(q[n,])));
+    }
+
+    return loglik;
+  }
+}
+
+data {
+  int<lower=0> N;
+  matrix[N, 2] y;
+}
+
+parameters {
+  real<lower=0> sigma1;
+  real<lower=0> sigma2;
+  real mu1;
+  real mu2;
+  
+  cholesky_factor_corr[2] rho_chol;
+}
+
+transformed parameters{
+  matrix[N, 2] u;
+  
+  for (n in 1:N) {
+    u[n, 1] = normal_cdf(y[n, 1] | mu1, sigma1);
+    u[n, 2] = normal_cdf(y[n, 2] | mu2, sigma2);
+  }
+}
+
+model {
+  // Priors matching simulated data (mu1=1, mu2=2, sigma=1)
+  mu1 ~ normal(0, 5);      // Weakly informative around true values
+  mu2 ~ normal(0, 5);      // Weakly informative around true values
+  
+  sigma1 ~ normal(0, 3);    // Weakly informative around true values
+  sigma2 ~ normal(0, 3);    // Weakly informative around true values
+  
+  rho_chol ~ lkj_corr_cholesky(2);  // Uniform over correlations
+
+  // Marginal likelihoods
+  y[, 1] ~ normal(mu1, sigma1);
+  y[, 2] ~ normal(mu2, sigma2);
+
+  // Copula contribution
+  u ~ gauss_copula_cholesky(rho_chol);
+}
+
+generated quantities {
+  real rho = multiply_lower_tri_self_transpose(rho_chol)[1, 2];
+  vector[N] log_lik;
+  matrix[2,2] Sigma = multiply_lower_tri_self_transpose(rho_chol);
+  vector[N] ll_copula = gauss_copula_cholesky_per_row(u, rho_chol);
+  
+  for (n in 1:N) {
+    // Marginal contributions
+    real ll_marg = normal_lpdf(y[n,1] | mu1, sigma1) + 
+                   normal_lpdf(y[n,2] | mu2, sigma2);
+    
+    // Total per-trial log-likelihood
+    log_lik[n] = ll_marg + ll_copula[n];
+  }
+}
+```
+
+---
+
+## Simulation Study
+
+We simulate data from a bivariate normal with:
+- Means: $\mu_1 = 1$, $\mu_2 = 2$
+- Standard deviations: $\sigma_1 = 1$, $\sigma_2 = 1$
+- Correlations: $\rho \in [-0.6, 0.6]$ (by 0.05)
+- Sample sizes: **N = 50, 100, 200, 500**
+
+```{r, echo = FALSE, results = 'hide', message = FALSE, warning = FALSE}
+
+# Set up parallel plan
+plan(multisession, workers = 10)
+
+# Correlations to simulate
+r = seq(-0.6, 0.6, by = 0.025)
+
+# Sample sizes to test
+sample_sizes = c(50, 100, 200, 500)
+
+# Function to simulate and fit models
+simulate_and_fit <- function(cor, n_sample) {
+  
+  # Simulate data with mu1=1, mu2=2, sigma1=1, sigma2=1
+  n_out <- mnormt::rmnorm(
+    n = n_sample, 
+    mean = c(1, 2),
+    varcov = cbind(c(1, cor), c(cor, 1))
+  )
+  
+  bdata <- data.frame(
+    y1 = n_out[,1],
+    y2 = n_out[,2]
+  )
+  
+  # Marginal model
+  datastan_margin <- list(
+    y1 = bdata$y1,
+    y2 = bdata$y2,
+    N = nrow(bdata)
+  )
+  
+  fit_margin <- marginal$sample(
+    data = datastan_margin,
+    refresh = 0,
+    iter_warmup = 2000,
+    iter_sampling = 5000,
+    adapt_delta = 0.99,
+    parallel_chains = 4
+  )
+  
+  # Multivariate & copula models
+  datastan_multi <- list(
+    y = cbind(bdata$y1, bdata$y2),
+    N = nrow(bdata)
+  )
+  
+  fit_multi <- multivariate$sample(
+    data = datastan_multi,
+    refresh = 0,
+    iter_warmup = 2000,
+    iter_sampling = 5000,
+    adapt_delta = 0.99,
+    parallel_chains = 4
+  )
+  
+  fit_cor <- copula$sample(
+    data = datastan_multi,
+    refresh = 0,
+    iter_warmup = 2000,
+    iter_sampling = 5000,
+    adapt_delta = 0.99,
+    parallel_chains = 4
+  )
+  
+  # Compute LOO comparison
+  loo_df <- data.frame(
+    loo::loo_compare(
+      list(
+        margin = fit_margin$loo(),
+        copula = fit_cor$loo(),
+        multi = fit_multi$loo()
+      )
+    )
+  ) %>% rownames_to_column()
+  
+  loo_df$sim_correlation <- cor
+  loo_df$sample_size <- n_sample
+  
+  return(list(loo_df))
+}
+
+# Create grid of parameters
+param_grid <- expand.grid(
+  cor = r,
+  n_sample = sample_sizes
+)
+
+# Run in parallel
+loos <- future_map2(
+  param_grid$cor, 
+  param_grid$n_sample, 
+  simulate_and_fit, 
+  .progress = TRUE
+)
+
+```
+
+---
+
+## Results
+
+### LOO-CV Comparison Across Sample Sizes
+
+```{r, fig.width=14, fig.height=10}
+plot_data <- map_dfr(loos, 1) %>% 
+  filter(elpd_diff != 0) %>% 
+  mutate(models = rowname,
+         sample_size = factor(sample_size, 
+                             levels = c(50, 100, 200, 500),
+                             labels = c("N = 50", "N = 100", "N = 200", "N = 500")))
+```
+
+
+```{r}
+mi_theory <- expand.grid(
+  r = seq(-0.6, 0.6, by = 0.01),
+  sample_size = sample_sizes
+) %>%
+  mutate(
+    mi = -0.5 * log(1 / (1 - r^2)),
+    elpd_theory = mi * sample_size,
+    sample_size = factor(sample_size, 
+                        levels = c(50, 100, 200, 500),
+                        labels = c("N = 50", "N = 100", "N = 200", "N = 500"))
+  )
+
+
+library(tidyverse)
+library(posterior)
+library(bayesplot)
+
+font = "sans"
+font_size = 16
+font_size_small = 12
+axis_width = 1.5
+tick_width = 1.5
+
+text = ggplot2::theme(text = ggplot2::element_text(family = font, size = font_size))
+theme = theme_classic()
+
+#patch theme
+patchtheme = ggplot2::theme(plot.tag = ggplot2::element_text(size = (font_size+4),
+                                                             family = "sans",
+                                                             face = "bold",
+                                                             hjust = 0.5,
+                                                             vjust = 0.5),
+                            text=ggplot2::element_text(family=font))
+
+
+library(ggplot2)
+library(dplyr)
+library(grid)  # for unit()
+
+# Minimal plot with coordinate system only
+base_plot <- plot_data %>% 
+  filter(sample_size == "N = 50" & models != "margin") %>% 
+  ggplot(aes(x = sim_correlation, y = elpd_diff)) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5, linewidth = 1.2) +
+ # geom_hline(yintercept = 0, linetype = "solid", size = 0.8, color = "black") + # x-axis
+  geom_vline(xintercept = 0, linetype = "solid", size = 0.8, color = "black", alpha = 0) + # y-axis
+  geom_vline(xintercept = 0.6, linetype = "solid", size = 0.8, color = "black", alpha = 0) + # y-axis
+    geom_vline(xintercept = 0.4, linetype = "solid", size = 0.8, color = "black", alpha = 0) + # y-axis
+    geom_vline(xintercept = 0.2, linetype = "solid", size = 0.8, color = "black", alpha = 0) + # y-axis
+    geom_vline(xintercept = -0.2, linetype = "solid", size = 0.8, color = "black", alpha = 0) + # y-axis
+    geom_vline(xintercept = -0.4, linetype = "solid", size = 0.8, color = "black", alpha = 0) + # y-axis
+    geom_vline(xintercept = -0.6, linetype = "solid", size = 0.8, color = "black", alpha = 0) + # y-axis
+  scale_x_continuous(
+    breaks = c(-0.6,-0.4,-0.2,0,0.2,0.4,0.6)
+  ) +
+  scale_y_continuous(breaks = 0, labels = "0") +
+  labs(x = "Simulated Correlation (ρ)",
+    y = "ELPD Difference")+
+  theme_classic() +
+  theme(
+    axis.ticks.length = unit(5, "pt"), # optional: small ticks
+        axis.text=element_text(size=font_size_small),
+        axis.title=element_text(size=font_size),
+        axis.line=element_line(size=axis_width),
+        axis.ticks=element_line(size=axis_width))
+
+
+ggsave(here::here("Mutual_info_base.tiff"),dpi = 300,width = 20, height = 14, units = "cm")
+
+
+
+```
+
+
+```{r}
+plot_data %>% filter(sample_size == "N = 50" & models != "margin") %>% 
+  ggplot(aes(x = sim_correlation, y = elpd_diff, color = models)) +
+  geom_pointrange(aes(ymin = elpd_diff - 2*se_diff,
+                      ymax = elpd_diff + 2*se_diff),
+                  size = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5, linewidth = 1.2) +
+  #  geom_line(
+  #   data = mi_theory %>% filter(sample_size == "N = 50"),
+  #   aes(x = r, y = elpd_theory),
+  #   color = "black",
+  #   linetype = "solid",
+  #   alpha = 0.7,
+  #   linewidth = 1.2,
+  #   inherit.aes = FALSE
+  # )+
+  scale_x_continuous(
+    breaks = c(-0.6,-0.4,-0.2,0,0.2,0.4,0.6), 
+    labels = c("-0.6","-0.4","-0.2","0.0","0.2","0.4","0.6")
+  ) +
+  labs(x = "Simulated Correlation (ρ)",
+    y = "ELPD Difference")+
+  theme_classic() +
+  scale_color_manual(values = c("red","orange","black"))+
+    theme+text+
+  theme(legend.position = "none",
+        legend.key.width = unit(0.85, 'cm'), #size of bars
+        plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.text = element_text(size=font_size_small),
+        axis.text=element_text(size=font_size_small),
+        axis.title=element_text(size=font_size),
+        axis.line=element_line(size=axis_width),
+        axis.ticks=element_line(size=axis_width))
+
+ggsave(here::here("Mutual_info_multivar.tiff"),dpi = 300,width = 20, height = 14, units = "cm")
+
+
+plot_data %>% filter(sample_size == "N = 50") %>% 
+  ggplot(aes(x = sim_correlation, y = elpd_diff, color = models)) +
+  geom_pointrange(aes(ymin = elpd_diff - 2*se_diff,
+                      ymax = elpd_diff + 2*se_diff),
+                  size = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5, linewidth = 1.2) +
+  #  geom_line(
+  #   data = mi_theory %>% filter(sample_size == "N = 50"),
+  #   aes(x = r, y = elpd_theory),
+  #   color = "black",
+  #   linetype = "solid",
+  #   alpha = 0.7,
+  #   linewidth = 1.2,
+  #   inherit.aes = FALSE
+  # )+
+  scale_x_continuous(
+    breaks = c(-0.6,-0.4,-0.2,0,0.2,0.4,0.6), 
+    labels = c("-0.6","-0.4","-0.2","0.0","0.2","0.4","0.6")
+  ) +
+  labs(x = "Simulated Correlation (ρ)",
+    y = "ELPD Difference")+
+  theme_classic() +
+  scale_color_manual(values = c("red","black","orange"))+
+    theme+text+
+  theme(legend.position = "none",
+        legend.key.width = unit(0.85, 'cm'), #size of bars
+        plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.text = element_text(size=font_size_small),
+        axis.text=element_text(size=font_size_small),
+        axis.title=element_text(size=font_size),
+        axis.line=element_line(size=axis_width),
+        axis.ticks=element_line(size=axis_width))
+
+
+ggsave(here::here("Mutual_info_all.tiff"),dpi = 300,width = 20, height = 14, units = "cm")
+
+
+
+
+
+
+
+plot_data %>% filter(sample_size == "N = 50") %>% 
+  ggplot(aes(x = sim_correlation, y = elpd_diff, color = models)) +
+  geom_pointrange(aes(ymin = elpd_diff - 2*se_diff,
+                      ymax = elpd_diff + 2*se_diff),
+                  size = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5, linewidth = 1.2) +
+   geom_line(
+    data = mi_theory %>% filter(sample_size == "N = 50"),
+    aes(x = r, y = elpd_theory),
+    color = "black",
+    linetype = "solid",
+    alpha = 0.7,
+    linewidth = 1.2,
+    inherit.aes = FALSE
+  )+
+  scale_x_continuous(
+    breaks = c(-0.6,-0.4,-0.2,0,0.2,0.4,0.6), 
+    labels = c("-0.6","-0.4","-0.2","0.0","0.2","0.4","0.6")
+  ) +
+  labs(x = "Simulated Correlation (ρ)",
+    y = "ELPD Difference")+
+  theme_classic() +
+  scale_color_manual(values = c("red","black","orange"))+
+    theme+text+
+  theme(legend.position = "none",
+        legend.key.width = unit(0.85, 'cm'), #size of bars
+        plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.text = element_text(size=font_size_small),
+        axis.text=element_text(size=font_size_small),
+        axis.title=element_text(size=font_size),
+        axis.line=element_line(size=axis_width),
+        axis.ticks=element_line(size=axis_width))
+
+
+ggsave(here::here("Mutual_info_all_line.tiff"),dpi = 300,width = 20, height = 14, units = "cm")
+
+
+
+
+
+
+plot_data %>% filter(sample_size == "N = 100") %>% 
+  ggplot(aes(x = sim_correlation, y = elpd_diff, color = models)) +
+  geom_pointrange(aes(ymin = elpd_diff - 2*se_diff,
+                      ymax = elpd_diff + 2*se_diff),
+                  size = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5, linewidth = 1.2) +
+   geom_line(
+    data = mi_theory %>% filter(sample_size == "N = 100"),
+    aes(x = r, y = elpd_theory),
+    color = "black",
+    linetype = "solid",
+    alpha = 0.7,
+    linewidth = 1.2,
+    inherit.aes = FALSE
+  )+
+  scale_x_continuous(
+    breaks = c(-0.6,-0.4,-0.2,0,0.2,0.4,0.6), 
+    labels = c("-0.6","-0.4","-0.2","0.0","0.2","0.4","0.6")
+  ) +
+  labs(x = "Simulated Correlation (ρ)",
+    y = "ELPD Difference")+
+  theme_classic() +
+  scale_color_manual(values = c("red","black","orange"))+
+    theme+text+
+  theme(legend.position = "none",
+        legend.key.width = unit(0.85, 'cm'), #size of bars
+        plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.text = element_text(size=font_size_small),
+        axis.text=element_text(size=font_size_small),
+        axis.title=element_text(size=font_size),
+        axis.line=element_line(size=axis_width),
+        axis.ticks=element_line(size=axis_width))
+
+
+ggsave(here::here("Mutual_info_all_line_100.tiff"),dpi = 300,width = 20, height = 14, units = "cm")
+
+
+
+
+plot_data %>% filter(sample_size == "N = 200") %>% 
+  ggplot(aes(x = sim_correlation, y = elpd_diff, color = models)) +
+  geom_pointrange(aes(ymin = elpd_diff - 2*se_diff,
+                      ymax = elpd_diff + 2*se_diff),
+                  size = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5, linewidth = 1.2) +
+   geom_line(
+    data = mi_theory %>% filter(sample_size == "N = 200"),
+    aes(x = r, y = elpd_theory),
+    color = "black",
+    linetype = "solid",
+    alpha = 0.7,
+    linewidth = 1.2,
+    inherit.aes = FALSE
+  )+
+  scale_x_continuous(
+    breaks = c(-0.6,-0.4,-0.2,0,0.2,0.4,0.6), 
+    labels = c("-0.6","-0.4","-0.2","0.0","0.2","0.4","0.6")
+  ) +
+  labs(x = "Simulated Correlation (ρ)",
+    y = "ELPD Difference")+
+  theme_classic() +
+  scale_color_manual(values = c("red","black","orange"))+
+    theme+text+
+  theme(legend.position = "none",
+        legend.key.width = unit(0.85, 'cm'), #size of bars
+        plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.text = element_text(size=font_size_small),
+        axis.text=element_text(size=font_size_small),
+        axis.title=element_text(size=font_size),
+        axis.line=element_line(size=axis_width),
+        axis.ticks=element_line(size=axis_width))
+
+
+ggsave(here::here("Mutual_info_all_line_200.tiff"),dpi = 300,width = 20, height = 14, units = "cm")
+
+
+
+
+
+
+plot_data %>% filter(sample_size == "N = 500") %>% 
+  ggplot(aes(x = sim_correlation, y = elpd_diff, color = models)) +
+  geom_pointrange(aes(ymin = elpd_diff - 2*se_diff,
+                      ymax = elpd_diff + 2*se_diff),
+                  size = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5, linewidth = 1.2) +
+   geom_line(
+    data = mi_theory %>% filter(sample_size == "N = 500"),
+    aes(x = r, y = elpd_theory),
+    color = "black",
+    linetype = "solid",
+    alpha = 0.7,
+    linewidth = 1.2,
+    inherit.aes = FALSE
+  )+
+  scale_x_continuous(
+    breaks = c(-0.6,-0.4,-0.2,0,0.2,0.4,0.6), 
+    labels = c("-0.6","-0.4","-0.2","0.0","0.2","0.4","0.6")
+  ) +
+  labs(x = "Simulated Correlation (ρ)",
+    y = "ELPD Difference")+
+  theme_classic() +
+  scale_color_manual(values = c("red","black","orange"))+
+    theme+text+
+  theme(legend.position = "none",
+        legend.key.width = unit(0.85, 'cm'), #size of bars
+        plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.text = element_text(size=font_size_small),
+        axis.text=element_text(size=font_size_small),
+        axis.title=element_text(size=font_size),
+        axis.line=element_line(size=axis_width),
+        axis.ticks=element_line(size=axis_width))
+
+
+ggsave(here::here("Mutual_info_all_line_500.tiff"),dpi = 300,width = 20, height = 14, units = "cm")
+
+
+
+
+
+plot_data %>% filter(sample_size == "N = 500") %>% 
+  mutate(models = ifelse(models == "margin","Independent Marginals",ifelse(models == "copula","Gaussian Copula","Multivariate Normal"))) %>% 
+  ggplot(aes(x = sim_correlation, y = elpd_diff, color = models)) +
+  geom_pointrange(aes(ymin = elpd_diff - 2*se_diff,
+                      ymax = elpd_diff + 2*se_diff),
+                  size = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5, linewidth = 1.2) +
+   geom_line(
+    data = mi_theory %>% filter(sample_size == "N = 500"),
+    aes(x = r, y = elpd_theory),
+    color = "black",
+    linetype = "solid",
+    alpha = 0.7,
+    linewidth = 1.2,
+    inherit.aes = FALSE
+  )+
+  scale_x_continuous(
+    breaks = c(-0.6,-0.4,-0.2,0,0.2,0.4,0.6), 
+    labels = c("-0.6","-0.4","-0.2","0.0","0.2","0.4","0.6")
+  ) +
+  labs(x = "Simulated Correlation (ρ)",
+    y = "ELPD Difference")+
+  theme_classic() +
+  scale_color_manual(values = c("red","black","orange"))+
+    theme+text+
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.text = element_text(size=font_size_small),
+        axis.text=element_text(size=font_size_small),
+        axis.title=element_text(size=font_size),
+        axis.line=element_line(size=axis_width),
+        axis.ticks=element_line(size=axis_width))
+
+
+ggsave(here::here("Mutual_info_legend.tiff"),dpi = 300,width = 20, height = 14, units = "cm")
+
+
+```
+
+
+
+```{r, fig.width=14, fig.height=10}
+# Create plot
+p <- plot_data %>% 
+  ggplot(aes(x = sim_correlation, y = elpd_diff, color = models)) +
+  geom_pointrange(aes(ymin = elpd_diff - 2*se_diff, 
+                      ymax = elpd_diff + 2*se_diff),
+                  size = 0.5) +
+  facet_wrap(~sample_size, ncol = 2, scales = "free_y") +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    text = element_text(size = 16),
+    strip.text = element_text(face = "bold", size = 14)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-0.6, 0.6, by = 0.2), 
+    labels = seq(-0.6, 0.6, by = 0.2)
+  ) +
+  labs(
+    x = "Simulated Correlation (ρ)",
+    y = "ELPD Difference (relative to best model)",
+    color = "Model",
+    title = "Model Comparison via LOO-CV: Effect of Sample Size",
+    subtitle = "Copula and Multivariate models are equivalent; Marginal model performs worse as |ρ| increases"
+  )
+
+print(p)
+```
+
+### Key Observations
+
+1. **Copula ≡ Multivariate**: The copula and multivariate implementations are equivalent (randomly alternating at elpd_diff = 0)
+
+2. **Marginal Model Degradation**: Performance loss is **quadratic** in correlation coefficient
+
+3. **Sample Size Effects**: Larger samples provide clearer discrimination between models
+
+---
+
+## Mutual Information Analysis
+
+The quadratic relationship with correlation follows from mutual information:
+
+$$
+MI(X, Y) = -\frac{1}{2} \log(1 - \rho^2)
+$$
+
+Expected ELPD difference scales with sample size and mutual information:
+
+```{r, fig.width=14, fig.height=10}
+# Add theoretical line
+mi_theory <- expand.grid(
+  r = seq(-0.6, 0.6, by = 0.01),
+  sample_size = sample_sizes
+) %>%
+  mutate(
+    mi = -0.5 * log(1 / (1 - r^2)),
+    elpd_theory = mi * sample_size,
+    sample_size = factor(sample_size, 
+                        levels = c(50, 100, 200, 500),
+                        labels = c("N = 50", "N = 100", "N = 200", "N = 500"))
+  )
+
+p + 
+  geom_line(
+    data = mi_theory,
+    aes(x = r, y = elpd_theory),
+    color = "black",
+    linetype = "solid",
+    linewidth = 1.2,
+    inherit.aes = FALSE
+  ) +
+  labs(
+    subtitle = "Black line shows theoretical MI × N prediction"
+  )
+```
+
+The black line shows the theoretical expected difference based on:
+$$
+\text{ELPD difference} \approx -\frac{N}{2} \log(1 - \rho^2)
+$$
+
+---
+
+## Conclusion
+
+**Main Findings**:
+
+1. ✅ **Copula implementation is correct**: Equivalent to multivariate normal for Gaussian marginals
+
+2. ✅ **LOO-CV captures true model structure**: Discriminates based on dependence strength
+
+3. ✅ **Sample size matters**: Larger N → clearer evidence for model with correct dependence structure
+
+4. ✅ **Theoretical alignment**: Empirical results match mutual information predictions
+
+**Next Steps**: Demonstrate copula's power with non-Gaussian marginals where multivariate normal is no longer appropriate!
+

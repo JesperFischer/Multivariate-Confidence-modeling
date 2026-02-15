@@ -15,7 +15,7 @@ Get_predictive_ACC_hier = function(fit, df, n_draws = 50) {
   df$subject = as.numeric(as.factor(df$subject))
 
   workers = 7
-  memory = 15000 * 1024^2
+  memory = 17000 * 1024^2
 
   # Parameters in the model
   parameters = c("alpha", "beta", "lapse",
@@ -955,7 +955,7 @@ Get_predictive_group = function(fit, df, n_draws = 50) {
 # Function to plot group-level predictions with ribbons
 Plot_group_predictive_psycho = function(predictions, df) {
 
-  cutoff = 40
+  cutoff = 24
 
   # Prepare observed data
   dataq = bind_rows(
@@ -1096,25 +1096,46 @@ Plot_group_predictive_psycho = function(predictions, df) {
 
   # Plot 1: Expected means (main plot)
   plot_mean = predictionsq_mean %>%
+    mutate(name = ifelse(name == "RT","Response time",
+                         ifelse(name == "Type-1","Binary choice","Confidence")),
+           name = factor(name, levels = c("Binary choice",
+                                          "Response time",
+                                          "Confidence"))) %>%
     ggplot() +
     geom_ribbon(aes(x = X, y = mean, ymin = q5, ymax = q95, fill = Correct), alpha = 0.1) +
     geom_ribbon(aes(x = X, y = mean, ymin = q10, ymax = q90, fill = Correct), alpha = 0.3) +
     geom_ribbon(aes(x = X, y = mean, ymin = q20, ymax = q80, fill = Correct), alpha = 0.5) +
-    geom_pointrange(data = dataq, aes(x = X, y = mean, ymin = q5, ymax = q95, fill = Correct),
+    geom_pointrange(data = dataq %>%
+                      mutate(name = ifelse(name == "RT","Response time",
+                                           ifelse(name == "Type-1","Binary choice","Confidence")),
+                             name = factor(name, levels = c("Binary choice",
+                                                            "Response time",
+                                                            "Confidence"))), aes(x = X, y = mean, ymin = q5, ymax = q95, fill = Correct),
                     shape = 21, color = "black", alpha = 0.5) +
     geom_line(aes(x = X, y = mean, color = Correct), linewidth = 1) +
     facet_wrap(~name, scales = "free_y", ncol = 3) +
-    theme_classic(base_size = 16) +
+    scale_y_continuous(breaks = scales::pretty_breaks(n = 4))+
+    scale_color_manual(values = c("darkgreen","darkred","grey"))+
+    scale_fill_manual(values = c("darkgreen","darkred","grey"))+
+    theme_classic(base_size = 20) +
     labs(color = "Correct", fill = "Correct",
-         title = "Group predictions (expected means)",
+         # title = "Group predictions (expected means)",
          y = "Value") +
     geom_vline(xintercept = 0, linetype = 2) +
     theme(legend.position = "top",
+          legend.text = element_text(size = 20),      # text of legend items
+          legend.title = element_text(size = 20),      # title of legend
           axis.title.x = element_blank(),
           axis.text.x = element_blank())
 
+
   # Plot 2: Residuals
-  plot_residuals = residuals_data %>%
+  plot_residuals = residuals_data  %>%
+    mutate(name = ifelse(name == "RT","Response time",
+                         ifelse(name == "Type-1","Binary choice","Confidence")),
+           name = factor(name, levels = c("Binary choice",
+                                          "Response time",
+                                          "Confidence"))) %>%
     ggplot(aes(x = X, y = residual_mean, color = Correct, fill = Correct)) +
     geom_hline(yintercept = 0, linetype = 2, alpha = 0.5) +
     geom_pointrange(aes(ymin = residual_mean - 2*residual_se,
@@ -1122,9 +1143,13 @@ Plot_group_predictive_psycho = function(predictions, df) {
                     alpha = 0.5, size = 0.3) +
     geom_smooth(method = "loess", se = TRUE, alpha = 0.2) +
     facet_wrap(~name, scales = "free_y", ncol = 3) +
-    theme_classic(base_size = 16) +
-    labs(x = "Stimulus strength (X)", y = "Residual (Obs - Pred)") +
+    theme_classic(base_size = 20) +
+    scale_color_manual(values = c("darkgreen","darkred","grey"))+
+    scale_fill_manual(values = c("darkgreen","darkred","grey"))+
+    labs(x = "Difference in tone freq.", y = "(Obs - Pred)") +
     geom_vline(xintercept = 0, linetype = 2) +
+    scale_y_continuous(breaks = scales::pretty_breaks(n = 4))+
+    scale_x_continuous(breaks = scales::pretty_breaks(n = 3))+
     theme(legend.position = "none")
 
   # Combine plots using patchwork

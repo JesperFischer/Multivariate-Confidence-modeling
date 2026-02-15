@@ -47,7 +47,10 @@ df = read.csv(here::here("Data","VMP_extero","raw_hrd.csv")) %>%
     RT = DecisionRT,
     subject = participant_id
   ) %>% 
-  mutate(Confidence = Confidence/100)
+  mutate(Confidence = Confidence/100) %>% mutate(
+    
+    resp = Y,
+  )
 
 ```
 
@@ -77,6 +80,8 @@ df1$subject = as.numeric(as.factor(df1$subject))
 
 t_p_s = df1 %>% group_by(subject) %>% summarize(n = n())
 
+
+df1 = df1 %>% mutate(X_scaled = (df1$X - mean(df1$X)) / sd(df1$X))
 
 ends <- cumsum(t_p_s$n)
 
@@ -186,14 +191,95 @@ pure <-mod3$sample(
 
 pure$save_object(here::here("Saved models","VMP_full_pure.rds"))
 
-twointsloobin = two_ints$loo("log_lik_bin")
-corloobin = cor$loo("log_lik_bin")
-pureloo = pure$loo()
+# twointsloobin = two_ints$loo("log_lik_bin")
+CBM = VMP_full_standard_ext$loo("log_lik_bin")
+pureloo = VMP_full_pure$loo()
 
-loo::loo_compare(list(twointsloobin,corloobin,pureloo))
+data.frame(loo::loo_compare(list(CBM = CBM,Bin = pureloo))) %>% rownames_to_column("Model") %>% 
+  ggplot(aes(x = elpd_diff, xmin = elpd_diff-2*se_diff, xmax = elpd_diff + 2*se_diff, y = Model, col = Model))+
+  geom_pointrange()+
+  geom_vline(xintercept = 0, linetype = 2, alpha = 0.5)+
+  theme+text+
+  labs(y = "")+
+  scale_color_manual(values = c("black","red"))+
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size=font_size),
+        legend.box = "horizontal",
+        legend.position = "none",
+        legend.direction="horizontal",
+        legend.justification='center',
+        legend.key.height = unit(0.5, 'cm'),
+        legend.key.width = unit(0.5, 'cm'),
+        legend.spacing.x = unit(0.35, "cm"),
+        plot.title = element_text(hjust = 0.5, size = font_size), #change legend key height
+        legend.text = element_text(size=font_size_small),
+        axis.text=element_text(size=font_size_small),
+        # axis.title=element_text(size=font_size),
+        axis.line=element_line(size=axis_width),
+        axis.ticks=element_line(size=axis_width),
+        axis.text.x = element_text(angle = 0, vjust = 0.5, hjust=0.5))
 
 
+ggsave(here::here("Bin_CBM_compar.tiff"),dpi = 300,width = 12, height = 6, units = "cm")
+  
 
 
 ```
+
+
+
+```{r}
+predictions = Get_predictive_ACC_hier(VMP_full_standard_ext,df1,10)
+```
+
+
+```{r,fig.height=20,fig.width=20, warning=F,message=F}
+
+qa = Plot_psychometric_ACC_hier(predictions,df1,bin = 5)
+qa
+```
+
+
+```{r,fig.height=20,fig.width=20, warning=F,message=F}
+bins = Plot_psychometric_resp_hier(predictions%>% filter(subject < 250),df1%>% filter(subject < 250),bin = 7)
+
+bins
+ggsave(here::here("all_bin_s1.tiff"),bins ,dpi = 300,width = 34, height = 18, units = "cm")
+
+
+bins = Plot_psychometric_resp_hier(predictions%>% filter(subject > 250),df1%>% filter(subject > 250),bin = 7)
+
+bins
+ggsave(here::here("all_bin_s2.tiff"),bins ,dpi = 300,width = 34, height = 18, units = "cm")
+
+
+```
+
+
+```{r,fig.height=20,fig.width=20, warning=F,message=F}
+rts = Plot_RT_hier(predictions %>% filter(subject < 250),df1%>% filter(subject < 250),bin = 10)
+
+rts
+ggsave(here::here("all_rts_s1.tiff"),rts ,dpi = 300,width = 34, height = 18, units = "cm")
+
+
+rts = Plot_RT_hier(predictions %>% filter(subject > 250),df1%>% filter(subject > 250),bin = 10)
+
+rts
+ggsave(here::here("all_rts_s2.tiff"),rts ,dpi = 300,width = 34, height = 18, units = "cm")
+
+```
+
+
+```{r,fig.height=20,fig.width=20, warning=F,message=F}
+group_preds = Get_predictive_group(VMP_full_standard_ext,df1,n_draws = 2000)
+```
+
+
+
+```{r,fig.height=20,fig.width=20, warning=F,message=F}
+Plot_group_predictive_psycho(group_preds,df1)
+```
+
+
 

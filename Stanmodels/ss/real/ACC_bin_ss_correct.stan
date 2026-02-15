@@ -212,7 +212,7 @@ transformed parameters{
 
   real alpha = (gm[1]);
   real beta = (gm[2]);
-  real lapse = inv_logit(gm[3]) / 2;
+  real lapse = gm[3];
 
   real rt_int = gm[4];
   real rt_slope = gm[5];
@@ -231,11 +231,11 @@ transformed parameters{
 
   profile("likelihood") {
   for (n in 1:N) {
-  theta[n] = psycho_ACC(X[n], (alpha), exp(beta), lapse);
+  theta[n] = psycho_ACC(X[n], (alpha), exp(beta), inv_logit(lapse)/ 2) ;
 
-  entropy_t[n] = entropy(psycho_ACC(X[n], (alpha), exp(beta), lapse));
+  entropy_t[n] = entropy(psycho_ACC(X[n], (alpha), exp(beta), inv_logit(lapse)/ 2));
 
-  theta_conf[n] = psycho_ACC(X[n], (alpha), exp(beta + meta_un), lapse);
+  theta_conf[n] = psycho_ACC(X[n], (alpha), exp(beta + meta_un), inv_logit(lapse)/ 2);
 
   conf_mu[n] = get_conf(ACC[n],theta_conf[n], X[n], alpha);
   }
@@ -243,13 +243,18 @@ transformed parameters{
 
 }
 model {
-  gm[1] ~ normal(0,10); //global mean of beta
-  gm[2] ~ normal(-2,3); //global mean of beta
+  gm[1] ~ normal(0,0.5); //global mean of beta
+  gm[2] ~ normal(1,2); //global mean of beta
   gm[3] ~ normal(-4,2); //global mean of beta
-  gm[4:9] ~ normal(0,3); //global mean of beta
+  gm[4] ~ normal(-1,2); //global mean of beta
+  gm[5] ~ normal(0,2); //global mean of beta
+  gm[6] ~ normal(-1,2); //global mean of beta
+  gm[7] ~ normal(3,2); //global mean of beta
+  gm[8] ~ normal(0,2); //global mean of beta
+  gm[9] ~ normal(0,2); //global mean of beta
 
 
-  rt_ndt ~ normal(0.3,0.05);
+  rt_ndt ~ normal(0.3,0.1);
 
 
 
@@ -274,7 +279,7 @@ model {
     c0 ~ induced_dirichlet([1,10,1]', 0, 1, c0, c11);
     c11 ~ induced_dirichlet([1,10,1]', 0, 2, c0, c11);
 
-    rho_chol ~ lkj_corr_cholesky(2);
+    rho_chol ~ lkj_corr_cholesky(12);
 
     u_mix ~ gauss_copula_cholesky(rho_chol);
 
